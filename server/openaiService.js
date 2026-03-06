@@ -160,24 +160,37 @@ Current result count: ${resultCount}
 
 Available columns: ${columnNames.join(', ')}
 
-Determine the user's intent and respond with JSON:
+CRITICAL COLUMN RULES:
+- The "POS" column is EMPTY (0% data). NEVER use it for filtering or sorting.
+- For anything related to "outstanding", "POS", "principal outstanding", "high amount", "high POS" → use "Amount Pending" instead.
+- "high POS" or "high outstanding" means sort by "Amount Pending" descending and take the top N.
 
-If they want a BREAKDOWN (e.g. "show by state", "breakdown by disposition", "DPD wise"):
+Determine the user's intent and respond with ONE of these JSON formats:
+
+1. BREAKDOWN (e.g. "show by state", "breakdown by disposition", "DPD wise"):
 { "type": "breakdown", "field": "exact column name to group by", "message": "brief response" }
 
-If they want to ADD/MODIFY FILTERS (e.g. "only Maharashtra", "DPD above 120"):
-{ "type": "filter", "action": "add", "filters": [{ "field": "...", "operator": "...", "value": "..." }], "message": "brief response" }
+2. REPLACE FILTERS — use this when the user changes the value of an existing filter or adds a new one. ALWAYS return the COMPLETE set of filters that should apply (not just the new one). Look at the current filters and decide which to keep, which to modify, and which to add.
+Examples:
+- "DPD above 120" when current has DPD > 60 → replace DPD filter with new value, keep all others
+- "only Maharashtra" when no State filter exists → add State filter, keep all others
+- "remove the state filter" → return all filters except State
+{ "type": "filter", "action": "replace_all", "filters": [<complete list of all filters that should apply>], "message": "brief response" }
 
-If they want to REMOVE a filter:
-{ "type": "filter", "action": "remove", "field": "field to remove", "message": "brief response" }
+3. SORT and/or LIMIT results (e.g. "top 300 by amount", "only 300 high POS cases", "top 100 highest outstanding", "pick 50 with highest DPD"):
+{ "type": "sort_and_limit", "sort_field": "exact column name (use Amount Pending for POS/outstanding)", "sort_order": "desc", "limit": 300, "message": "brief response" }
 
-If they want to RESET and start fresh:
+4. RESET and start fresh:
 { "type": "reset", "message": "Sure, let's start over." }
 
-If it's a general question or unclear:
+5. General question or unclear:
 { "type": "text", "message": "your helpful response" }
 
-Map user terms: "disposition"→"Latest Disposition", "calls"→"Call Sent count", "DPD"→"DPD", etc.`
+IMPORTANT:
+- For filter type, ALWAYS use action "replace_all" and return the COMPLETE final filter list. This prevents duplicate/conflicting filters.
+- For numeric values, use numbers not strings (90 not "90").
+- Filter operators: equals, not_equals, contains, greater_than, less_than, greater_than_or_equal, less_than_or_equal, between, in, not_in, is_empty, is_not_empty
+- Map user terms: "disposition"→"Latest Disposition", "calls"→"Call Sent count", "DPD"→"DPD", "POS"/"outstanding"/"principal"→"Amount Pending".`
       },
       { role: 'user', content: message }
     ]

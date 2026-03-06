@@ -1,11 +1,17 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   AppBar, Toolbar, Typography, Box, TextField, IconButton,
-  CircularProgress,
+  CircularProgress, ToggleButtonGroup, ToggleButton, Button, Badge,
+  LinearProgress,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
+import GavelIcon from '@mui/icons-material/Gavel';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import ChatIcon from '@mui/icons-material/Chat';
 import ChatMessage from './components/ChatMessage';
-import { parseQuery, runQuery, followUp } from './api';
+import NoticeDashboard from './components/NoticeDashboard';
+import NoticeEditor from './components/NoticeEditor';
+import { parseQuery, runQuery, followUp, generateNotices, getNotices } from './api';
 
 export default function App() {
   const [messages, setMessages] = useState([
@@ -24,6 +30,15 @@ export default function App() {
   const [originalFilters, setOriginalFilters] = useState([]);
   const [cases, setCases] = useState(null);
   const [phase, setPhase] = useState('query'); // query | clarifying | results
+  const [selectedCaseIds, setSelectedCaseIds] = useState([]);
+
+  // Phase 2 state
+  const [view, setView] = useState('picker'); // picker | dashboard | editor
+  const [userRole, setUserRole] = useState('legal_ops'); // legal_ops | lawyer
+  const [editingNoticeId, setEditingNoticeId] = useState(null);
+  const [noticeCount, setNoticeCount] = useState(0);
+  const [generatingNotices, setGeneratingNotices] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0 });
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -31,6 +46,13 @@ export default function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Fetch notice count for badge
+  useEffect(() => {
+    if (view === 'picker') {
+      getNotices().then(data => setNoticeCount(data.notices?.length || 0)).catch(() => {});
+    }
+  }, [view]);
 
   const addMessage = (msg) => {
     setMessages(prev => [...prev, { id: Date.now() + Math.random(), ...msg }]);
@@ -96,7 +118,7 @@ export default function App() {
     });
   };
 
-  const handleOptionSelect = async (question, option, questionIndex) => {
+  const handleOptionSelect = useCallback(async (question, option, questionIndex) => {
     addMessage({ role: 'user', type: 'text', content: option });
 
     const newAnswers = { ...answers, [question.id]: option };
@@ -106,7 +128,6 @@ export default function App() {
     if (nextIndex < pendingQuestions.length) {
       showNextQuestion(pendingQuestions, nextIndex);
     } else {
-      // All questions answered — run the query
       setLoading(true);
       try {
         await executeQuery(originalFilters, pendingQuestions, newAnswers);
@@ -114,7 +135,7 @@ export default function App() {
         setLoading(false);
       }
     }
-  };
+  }, [answers, pendingQuestions, originalFilters]);
 
   const executeQuery = async (queryFilters, questions, finalAnswers) => {
     setLoading(true);
@@ -190,114 +211,210 @@ export default function App() {
     }
   };
 
+  const handleGenerateNotices = useCallback(async (selectedRows) => {
+    if (!selectedRows || selectedRows.length === 0) return;
+
+    setGeneratingNotices(true);
+    setGenerationProgress({ current: 0, total: selectedRows.length });
+
+    try {
+      const result = await generateNotices(selectedRows);
+      setGeneratingNotices(false);
+
+      addMessage({
+        role: 'assistant',
+        type: 'text',
+        content: `Generated ${result.generated} notice${result.generated !== 1 ? 's' : ''} successfully${result.failed > 0 ? ` (${result.failed} failed)` : ''}. Switch to the Notice Dashboard to view and edit them.`,
+      });
+
+      // Update notice count
+      getNotices().then(data => setNoticeCount(data.notices?.length || 0)).catch(() => {});
+    } catch (err) {
+      setGeneratingNotices(false);
+      addMessage({
+        role: 'assistant',
+        type: 'text',
+        content: `Failed to generate notices: ${err.response?.data?.error || err.message}`,
+      });
+    }
+  }, []);
+
+  const handleEditNotice = (noticeId) => {
+    setEditingNoticeId(noticeId);
+    setView('editor');
+  };
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
       <AppBar position="static" elevation={0} sx={{ bgcolor: 'primary.dark' }}>
-        <Toolbar>
+        <Toolbar sx={{ gap: 2 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: 1 }}>
             DPDzero
           </Typography>
-          <Typography variant="body1" sx={{ ml: 2, opacity: 0.8 }}>
-            Legal Case Picker
+          <Typography variant="body1" sx={{ opacity: 0.8 }}>
+            Legal Notice System
           </Typography>
+
+          <Box sx={{ flex: 1 }} />
+
+          {/* View switcher */}
+          <ToggleButtonGroup
+            value={view}
+            exclusive
+            onChange={(_, v) => { if (v) { setView(v); setEditingNoticeId(null); } }}
+            size="small"
+            sx={{
+              '& .MuiToggleButton-root': {
+                color: 'rgba(255,255,255,0.7)', borderColor: 'rgba(255,255,255,0.3)',
+                '&.Mui-selected': { color: 'white', bgcolor: 'rgba(255,255,255,0.15)' },
+              },
+            }}
+          >
+            <ToggleButton value="picker"><ChatIcon sx={{ mr: 0.5 }} fontSize="small" />Case Picker</ToggleButton>
+            <ToggleButton value="dashboard">
+              <Badge badgeContent={noticeCount} color="error" max={999} sx={{ '& .MuiBadge-badge': { fontSize: '0.65rem' } }}>
+                <ListAltIcon sx={{ mr: 0.5 }} fontSize="small" />
+              </Badge>
+              Notices
+            </ToggleButton>
+          </ToggleButtonGroup>
+
+          {/* Role switcher */}
+          <ToggleButtonGroup
+            value={userRole}
+            exclusive
+            onChange={(_, r) => { if (r) setUserRole(r); }}
+            size="small"
+            sx={{
+              '& .MuiToggleButton-root': {
+                color: 'rgba(255,255,255,0.7)', borderColor: 'rgba(255,255,255,0.3)',
+                '&.Mui-selected': { color: 'white', bgcolor: 'rgba(255,255,255,0.15)' },
+              },
+            }}
+          >
+            <ToggleButton value="legal_ops">Legal Ops</ToggleButton>
+            <ToggleButton value="lawyer">Lawyer</ToggleButton>
+          </ToggleButtonGroup>
         </Toolbar>
       </AppBar>
 
-      {/* Chat messages area */}
-      <Box sx={{
-        flex: 1, overflowY: 'auto', px: 2, py: 2,
-        display: 'flex', flexDirection: 'column', gap: 1.5,
-      }}>
-        {messages.map(msg => (
-          <ChatMessage
-            key={msg.id}
-            message={msg}
-            onOptionSelect={handleOptionSelect}
-            loading={loading}
-          />
-        ))}
-        {loading && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
-            <CircularProgress size={18} sx={{ color: 'primary.main' }} />
-            <Typography variant="body2" color="text.secondary">Thinking...</Typography>
-          </Box>
-        )}
-        <div ref={messagesEndRef} />
-      </Box>
+      {/* Generation progress */}
+      {generatingNotices && (
+        <Box sx={{ px: 3, py: 2, bgcolor: '#F0EEFE', borderBottom: '1px solid', borderColor: 'primary.main' }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+            Generating notices... This may take a moment.
+          </Typography>
+          <LinearProgress />
+        </Box>
+      )}
 
-      {/* Input area */}
-      <Box sx={{
-        p: 2, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper',
-        display: 'flex', gap: 1, alignItems: 'flex-end',
-      }}>
-        <TextField
-          inputRef={inputRef}
-          fullWidth
-          multiline
-          maxRows={4}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={
-            phase === 'query'
-              ? 'Describe the cases you want to pick...'
-              : phase === 'clarifying'
-              ? 'Or type your own answer...'
-              : 'Ask a follow-up: "breakdown by state", "filter DPD > 120", "start over"...'
-          }
-          variant="outlined"
-          size="small"
-          disabled={loading}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              if (phase === 'clarifying') {
-                // In clarifying phase, typed text acts as "Other" for current question
-                const text = input.trim();
-                if (!text) return;
-                const currentQIdx = pendingQuestions.length - (pendingQuestions.length -
-                  Object.keys(answers).length);
-                const unansweredIdx = Object.keys(answers).length;
-                if (unansweredIdx < pendingQuestions.length) {
-                  const q = pendingQuestions[unansweredIdx];
-                  setInput('');
-                  handleOptionSelect(q, text, unansweredIdx);
-                }
-              } else {
-                handleSend();
-              }
-            }
-          }}
-          sx={{
-            '& .MuiOutlinedInput-root': { borderRadius: 3 },
-          }}
+      {/* Main content */}
+      {view === 'editor' && editingNoticeId ? (
+        <NoticeEditor
+          noticeId={editingNoticeId}
+          onBack={() => setView('dashboard')}
+          userRole={userRole}
         />
-        <IconButton
-          color="primary"
-          onClick={() => {
-            if (phase === 'clarifying') {
-              const text = input.trim();
-              if (!text) return;
-              const unansweredIdx = Object.keys(answers).length;
-              if (unansweredIdx < pendingQuestions.length) {
-                const q = pendingQuestions[unansweredIdx];
-                setInput('');
-                handleOptionSelect(q, text, unansweredIdx);
+      ) : view === 'dashboard' ? (
+        <NoticeDashboard onEditNotice={handleEditNotice} userRole={userRole} />
+      ) : (
+        <>
+          {/* Chat messages area */}
+          <Box sx={{
+            flex: 1, overflowY: 'auto', px: 2, py: 2,
+            display: 'flex', flexDirection: 'column', gap: 1.5,
+          }}>
+            {messages.map(msg => (
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                onOptionSelect={handleOptionSelect}
+                onGenerateNotices={handleGenerateNotices}
+                loading={loading}
+                generatingNotices={generatingNotices}
+              />
+            ))}
+            {loading && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
+                <CircularProgress size={18} sx={{ color: 'primary.main' }} />
+                <Typography variant="body2" color="text.secondary">Thinking...</Typography>
+              </Box>
+            )}
+            <div ref={messagesEndRef} />
+          </Box>
+
+          {/* Input area */}
+          <Box sx={{
+            p: 2, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper',
+            display: 'flex', gap: 1, alignItems: 'flex-end',
+          }}>
+            <TextField
+              inputRef={inputRef}
+              fullWidth
+              multiline
+              maxRows={4}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={
+                phase === 'query'
+                  ? 'Describe the cases you want to pick...'
+                  : phase === 'clarifying'
+                  ? 'Or type your own answer...'
+                  : 'Ask a follow-up: "breakdown by state", "filter DPD > 120", "start over"...'
               }
-            } else {
-              handleSend();
-            }
-          }}
-          disabled={loading || !input.trim()}
-          sx={{
-            bgcolor: 'primary.main', color: 'white', borderRadius: 2,
-            '&:hover': { bgcolor: 'primary.dark' },
-            '&.Mui-disabled': { bgcolor: 'grey.300', color: 'grey.500' },
-            width: 40, height: 40,
-          }}
-        >
-          <SendIcon fontSize="small" />
-        </IconButton>
-      </Box>
+              variant="outlined"
+              size="small"
+              disabled={loading}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (phase === 'clarifying') {
+                    const text = input.trim();
+                    if (!text) return;
+                    const unansweredIdx = Object.keys(answers).length;
+                    if (unansweredIdx < pendingQuestions.length) {
+                      const q = pendingQuestions[unansweredIdx];
+                      setInput('');
+                      handleOptionSelect(q, text, unansweredIdx);
+                    }
+                  } else {
+                    handleSend();
+                  }
+                }
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': { borderRadius: 3 },
+              }}
+            />
+            <IconButton
+              color="primary"
+              onClick={() => {
+                if (phase === 'clarifying') {
+                  const text = input.trim();
+                  if (!text) return;
+                  const unansweredIdx = Object.keys(answers).length;
+                  if (unansweredIdx < pendingQuestions.length) {
+                    const q = pendingQuestions[unansweredIdx];
+                    setInput('');
+                    handleOptionSelect(q, text, unansweredIdx);
+                  }
+                } else {
+                  handleSend();
+                }
+              }}
+              disabled={loading || !input.trim()}
+              sx={{
+                bgcolor: 'primary.main', color: 'white', borderRadius: 2,
+                '&:hover': { bgcolor: 'primary.dark' },
+                '&.Mui-disabled': { bgcolor: 'grey.300', color: 'grey.500' },
+                width: 40, height: 40,
+              }}
+            >
+              <SendIcon fontSize="small" />
+            </IconButton>
+          </Box>
+        </>
+      )}
     </Box>
   );
 }

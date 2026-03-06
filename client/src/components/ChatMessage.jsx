@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, memo, useMemo } from 'react';
 import {
   Box, Typography, Paper, Chip, TextField, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  LinearProgress,
+  LinearProgress, CircularProgress,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import GavelIcon from '@mui/icons-material/Gavel';
@@ -21,7 +21,7 @@ const DISPLAY_COLUMNS = [
   { field: 'Pin Code', headerName: 'Pin Code', width: 90 },
 ];
 
-export default function ChatMessage({ message, onOptionSelect, loading }) {
+function ChatMessage({ message, onOptionSelect, onGenerateNotices, loading, generatingNotices }) {
   const { role, type } = message;
   const isUser = role === 'user';
 
@@ -43,11 +43,19 @@ export default function ChatMessage({ message, onOptionSelect, loading }) {
           disabled={loading}
         />
       )}
-      {type === 'results' && <ResultsBubble message={message} />}
+      {type === 'results' && (
+        <ResultsBubble
+          message={message}
+          onGenerateNotices={onGenerateNotices}
+          generatingNotices={generatingNotices}
+        />
+      )}
       {type === 'breakdown' && <BreakdownBubble message={message} />}
     </Box>
   );
 }
+
+export default memo(ChatMessage);
 
 function TextBubble({ content, isUser }) {
   return (
@@ -165,9 +173,16 @@ function QuestionBubble({ question, questionIndex, totalQuestions, onOptionSelec
   );
 }
 
-function ResultsBubble({ message }) {
+const ResultsBubble = memo(function ResultsBubble({ message, onGenerateNotices, generatingNotices }) {
   const { cases, explanation, filtersApplied, resultCount, totalCount } = message;
-  const rows = (cases || []).map((c, i) => ({ id: i, ...c }));
+  const rows = useMemo(() => (cases || []).map((c, i) => ({ id: i, ...c })), [cases]);
+  const [selectedRows, setSelectedRows] = useState([]);
+
+  const handleGenerateClick = () => {
+    if (selectedRows.length === 0) return;
+    const selectedCases = selectedRows.map(id => cases[id]);
+    onGenerateNotices(selectedCases);
+  };
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -217,6 +232,8 @@ function ResultsBubble({ message }) {
           columns={DISPLAY_COLUMNS}
           checkboxSelection
           disableRowSelectionOnClick
+          onRowSelectionModelChange={(ids) => setSelectedRows(ids)}
+          rowSelectionModel={selectedRows}
           pageSizeOptions={[25, 50, 100]}
           initialState={{
             pagination: { paginationModel: { pageSize: 25 } },
@@ -232,21 +249,29 @@ function ResultsBubble({ message }) {
         />
       </Paper>
 
-      {/* Phase 2 placeholder */}
-      <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'flex-end' }}>
+      {/* Generate Notices button */}
+      <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 2 }}>
+        {selectedRows.length > 0 && (
+          <Typography variant="body2" color="text.secondary">
+            {selectedRows.length} case{selectedRows.length !== 1 ? 's' : ''} selected for notice generation
+          </Typography>
+        )}
         <Button
           variant="contained"
           size="small"
-          startIcon={<GavelIcon />}
-          disabled
-          sx={{ opacity: 0.5 }}
+          startIcon={generatingNotices ? <CircularProgress size={16} color="inherit" /> : <GavelIcon />}
+          disabled={selectedRows.length === 0 || generatingNotices}
+          onClick={handleGenerateClick}
         >
-          Generate Notices (Phase 2)
+          {generatingNotices
+            ? 'Generating Notices...'
+            : `Generate Notices${selectedRows.length > 0 ? ` (${selectedRows.length})` : ''}`
+          }
         </Button>
       </Box>
     </Box>
   );
-}
+});
 
 function BreakdownBubble({ message }) {
   const { field, breakdown, message: text } = message;
