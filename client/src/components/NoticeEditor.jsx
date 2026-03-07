@@ -28,6 +28,7 @@ const QUILL_MODULES_READONLY = { toolbar: false };
 import {
   getNotice, updateNoticeContent, aiEditNotice, sendToLawyer,
   signNotice, rejectNotice, previewPdf, downloadPdf, sendEmail,
+  fetchSignatureDataUrl,
 } from '../api';
 
 const STATUS_LABELS = {
@@ -57,6 +58,7 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
   const [emailSending, setEmailSending] = useState(false);
+  const [pdfError, setPdfError] = useState(null);
   const saveTimeoutRef = useRef(null);
 
   useEffect(() => {
@@ -116,9 +118,10 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
   };
 
   const handlePreviewPdf = async () => {
+    setPdfError(null);
     setPdfLoading(true);
     try {
-      // Save first
+      // Save first so PDF has latest content (including signature if signed)
       await updateNoticeContent(noticeId, notice.notice_content);
       const blob = await previewPdf(noticeId);
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
@@ -126,6 +129,15 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
       setPdfUrl(url);
     } catch (err) {
       console.error('PDF preview failed:', err);
+      let msg = err.message || 'PDF preview failed';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const j = JSON.parse(text);
+          if (j.error) msg = j.error;
+        } catch { /* ignore */ }
+      } else if (err.response?.data?.error) msg = err.response.data.error;
+      setPdfError(msg);
     } finally {
       setPdfLoading(false);
     }
@@ -149,7 +161,12 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
     try {
       await updateNoticeContent(noticeId, notice.notice_content);
       const updated = await sendToLawyer(noticeId);
-      setNotice(updated);
+      // Preserve notice_content in case response omits or truncates it (e.g. large payload)
+      setNotice(prev => ({
+        ...updated,
+        notice_content: updated.notice_content ?? prev?.notice_content ?? '',
+      }));
+      onBack();
     } catch (err) {
       console.error('Send to lawyer failed:', err);
     }
@@ -157,8 +174,29 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
 
   const handleSign = async () => {
     try {
+      // Close PDF preview so user sees editor after sign (avoids blank/stale PDF)
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+        setPdfUrl(null);
+      }
+      const content = notice.notice_content || '';
+      // Already has signature image (embedded data URL or URL reference)
+      const hasSignature = (content.includes('data:image/png;base64,') || content.includes('lawyer_signature')) && content.includes('Unnati Vashisth');
+      // Match lawyer block: <p><strong>Unnati Vashisth</strong></p> then optional whitespace then <p>(Advocate)</p>
+      const lawyerBlockRegex = /<p><strong>Unnati Vashisth<\/strong><\/p>\s*<p>\(Advocate\)<\/p>/;
+      if (!hasSignature && lawyerBlockRegex.test(content)) {
+        const dataUrl = await fetchSignatureDataUrl();
+        const signatureParagraph = `<p class="ql-align-left"><img src="${dataUrl}" alt="Signature" style="max-height: 80px; margin-bottom: 4px;" /></p>`;
+        const updatedContent = content.replace(
+          lawyerBlockRegex,
+          (match) => signatureParagraph + match
+        );
+        await updateNoticeContent(noticeId, updatedContent);
+        setNotice(prev => prev ? { ...prev, notice_content: updatedContent } : prev);
+      }
       const updated = await signNotice(noticeId, 'Unnati Vashisth (Advocate)');
       setNotice(updated);
+      await loadNotice();
     } catch (err) {
       console.error('Sign failed:', err);
     }
@@ -239,22 +277,32 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
               <iframe src={pdfUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="PDF Preview" />
               <Button
                 variant="contained" size="small"
-                onClick={() => { URL.revokeObjectURL(pdfUrl); setPdfUrl(null); }}
+                onClick={() => { URL.revokeObjectURL(pdfUrl); setPdfUrl(null); setPdfError(null); }}
                 sx={{ position: 'absolute', top: 10, right: 10 }}
               >
                 Close Preview
               </Button>
             </Box>
           ) : (
-            <Box sx={{ flex: 1, overflow: 'auto' }}>
-              <ReactQuill
-                value={notice.notice_content}
-                onChange={handleContentChange}
-                readOnly={!isEditable}
-                theme="snow"
-                style={{ height: 'calc(100% - 42px)' }}
-                modules={isEditable ? QUILL_MODULES_EDITABLE : QUILL_MODULES_READONLY}
-              />
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {pdfError && (
+                <Box sx={{ px: 2, py: 1, bgcolor: 'error.light', color: 'error.contrastText', display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2">{pdfError}</Typography>
+                  <Button size="small" sx={{ color: 'inherit', borderColor: 'currentColor' }} variant="outlined" onClick={() => { setPdfError(null); handlePreviewPdf(); }}>
+                    Retry
+                  </Button>
+                </Box>
+              )}
+              <Box sx={{ flex: 1, overflow: 'auto' }}>
+                <ReactQuill
+                  value={notice.notice_content}
+                  onChange={handleContentChange}
+                  readOnly={!isEditable}
+                  theme="snow"
+                  style={{ height: 'calc(100% - 42px)' }}
+                  modules={isEditable ? QUILL_MODULES_EDITABLE : QUILL_MODULES_READONLY}
+                />
+              </Box>
             </Box>
           )}
         </Box>
