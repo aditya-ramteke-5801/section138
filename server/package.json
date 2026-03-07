@@ -8,12 +8,12 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
+    "archiver": "^7.0.0",
     "cors": "^2.8.5",
     "csv-parser": "^3.0.0",
     "dotenv": "^16.4.5",
-    "archiver": "^7.0.0",
     "express": "^4.21.0",
-    "nodemailer": "^6.9.0",
+    "nodemailer": "^6.10.1",
     "openai": "^4.70.0",
     "puppeteer": "^22.0.0"
   }
