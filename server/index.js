@@ -14,11 +14,21 @@ const { generatePdf } = require('./pdfService');
 const { sendNoticeEmail } = require('./emailService');
 const archiver = require('archiver');
 
+const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 5001;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+
+// Serve lawyer signature from hackathon root (for editor display)
+app.get('/api/lawyer_signature.png', (req, res) => {
+  const sigPath = path.resolve(__dirname, '..', '..', 'lawyer_signature.png');
+  res.setHeader('Content-Type', 'image/png');
+  res.sendFile(sigPath, (err) => {
+    if (err) res.status(404).end();
+  });
+});
 
 // GET /api/columns
 app.get('/api/columns', (req, res) => {
@@ -193,8 +203,8 @@ function computeSampleStats(cases) {
 
 // ============ PHASE 2: Legal Notice Endpoints ============
 
-// POST /api/generate-notices — generate notices for selected cases
-app.post('/api/generate-notices', async (req, res) => {
+// Handler for generate-notices (shared by both route paths)
+async function handleGenerateNotices(req, res) {
   try {
     const { cases: selectedCases } = req.body;
     if (!selectedCases || !Array.isArray(selectedCases) || selectedCases.length === 0) {
@@ -235,7 +245,12 @@ app.post('/api/generate-notices', async (req, res) => {
     console.error('Generate notices error:', err);
     res.status(500).json({ error: err.message });
   }
-});
+}
+
+// POST /api/generate-notices — generate notices for selected cases
+app.post('/api/generate-notices', handleGenerateNotices);
+// Also accept without /api prefix (in case proxy strips it)
+app.post('/generate-notices', handleGenerateNotices);
 
 // GET /api/notices — list all notices
 app.get('/api/notices', (req, res) => {

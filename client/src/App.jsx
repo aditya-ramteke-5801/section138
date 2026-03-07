@@ -279,11 +279,17 @@ export default function App() {
             </ToggleButton>
           </ToggleButtonGroup>
 
-          {/* Role switcher */}
+          {/* Role switcher — close notice editor when switching role */}
           <ToggleButtonGroup
             value={userRole}
             exclusive
-            onChange={(_, r) => { if (r) setUserRole(r); }}
+            onChange={(_, r) => {
+              if (r) {
+                setUserRole(r);
+                setEditingNoticeId(null);
+                if (view === 'editor') setView('dashboard');
+              }
+            }}
             size="small"
             sx={{
               '& .MuiToggleButton-root': {

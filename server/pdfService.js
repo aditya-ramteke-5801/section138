@@ -18,12 +18,16 @@ async function generatePdf(notice) {
   const b = await getBrowser();
   const page = await b.newPage();
 
-  await page.setContent(html, { waitUntil: 'networkidle0' });
+  await page.setContent(html, {
+    waitUntil: 'networkidle0',
+    timeout: 60000,
+  });
 
   const pdfBuffer = await page.pdf({
     format: 'A4',
     margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
     printBackground: true,
+    timeout: 30000,
   });
 
   await page.close();

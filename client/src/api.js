@@ -1,6 +1,52 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: '/api' });
+const baseURL = import.meta.env.VITE_API_URL || '/api';
+const api = axios.create({ baseURL });
+
+/** Full URL for lawyer signature image (works in editor and when deployed). */
+export function getSignatureImageUrl() {
+  const origin = import.meta.env.VITE_API_URL && String(import.meta.env.VITE_API_URL).startsWith('http')
+    ? new URL(import.meta.env.VITE_API_URL).origin
+    : window.location.origin;
+  return `${origin}/api/lawyer_signature.png`;
+}
+
+/** Fetch signature image, optionally resize for embedding, return as data URL. */
+export async function fetchSignatureDataUrl(maxWidth = 280) {
+  const url = getSignatureImageUrl();
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to load signature image');
+  const blob = await res.blob();
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.width;
+      const h = img.height;
+      if (w <= maxWidth) {
+        resolve(dataUrl);
+        return;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = maxWidth;
+      canvas.height = Math.round((h * maxWidth) / w);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      try {
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => reject(new Error('Failed to decode signature image'));
+    img.src = dataUrl;
+  });
+}
 
 export async function parseQuery(query) {
   const { data } = await api.post('/parse-query', { query });

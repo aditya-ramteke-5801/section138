@@ -1,7 +1,28 @@
 // HTML template for legal notice PDF generation
 // Handles Quill editor classes (ql-align-center, ql-align-right)
 
+const path = require('path');
+const fs = require('fs');
+
 function getNoticeHtml(notice) {
+  let noticeContent = notice.notice_content || '';
+  // Embed lawyer signature image as base64 so PDF can render it (Puppeteer has no base URL)
+  if (noticeContent.includes('lawyer_signature.png')) {
+    const sigPath = path.resolve(__dirname, '..', '..', 'lawyer_signature.png');
+    try {
+      if (fs.existsSync(sigPath)) {
+        const sigBase64 = fs.readFileSync(sigPath).toString('base64');
+        const dataUrl = `data:image/png;base64,${sigBase64}`;
+        // Replace any img src pointing to lawyer_signature.png (relative or absolute URL)
+        noticeContent = noticeContent.replace(
+          /src="[^"]*lawyer_signature\.png[^"]*"/gi,
+          `src="${dataUrl}"`
+        );
+      }
+    } catch (e) {
+      // leave img as-is if file missing or read fails
+    }
+  }
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -52,15 +73,7 @@ function getNoticeHtml(notice) {
   .ql-align-center { text-align: center; }
   .ql-align-right { text-align: right; }
   .ql-align-justify { text-align: justify; }
-
-  .signed-stamp {
-    margin-top: 30px;
-    padding: 12px 20px;
-    border: 2px solid #333;
-    display: inline-block;
-    font-weight: bold;
-    text-align: center;
-  }
+  .ql-align-left { text-align: left; }
 </style>
 </head>
 <body>
@@ -70,16 +83,8 @@ function getNoticeHtml(notice) {
   </div>
 
   <div class="notice-content">
-    ${notice.notice_content}
+    ${noticeContent}
   </div>
-
-  ${notice.status === 'signed' ? `
-  <div class="signed-stamp">
-    <p>SIGNED & APPROVED</p>
-    <p>${notice.signed_by || 'Advocate'}</p>
-    <p>${notice.signed_at ? new Date(notice.signed_at).toLocaleDateString('en-IN') : ''}</p>
-  </div>
-  ` : ''}
 </body>
 </html>`;
 }
