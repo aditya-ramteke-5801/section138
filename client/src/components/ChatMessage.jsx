@@ -3,6 +3,7 @@ import {
   Box, Typography, Paper, Chip, TextField, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   LinearProgress, CircularProgress,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import GavelIcon from '@mui/icons-material/Gavel';
@@ -177,11 +178,20 @@ const ResultsBubble = memo(function ResultsBubble({ message, onGenerateNotices, 
   const { cases, explanation, filtersApplied, resultCount, totalCount } = message;
   const rows = useMemo(() => (cases || []).map((c, i) => ({ id: i, ...c })), [cases]);
   const [selectedRows, setSelectedRows] = useState([]);
+  const [officerDialogOpen, setOfficerDialogOpen] = useState(false);
+  const [officerName, setOfficerName] = useState('');
+  const [officerPhone, setOfficerPhone] = useState('');
 
   const handleGenerateClick = () => {
     if (selectedRows.length === 0) return;
+    setOfficerDialogOpen(true);
+  };
+
+  const handleOfficerSubmit = () => {
+    if (!officerName.trim() || !officerPhone.trim()) return;
+    setOfficerDialogOpen(false);
     const selectedCases = selectedRows.map(id => cases[id]);
-    onGenerateNotices(selectedCases);
+    onGenerateNotices(selectedCases, { name: officerName.trim(), phone: officerPhone.trim() });
   };
 
   return (
@@ -269,6 +279,38 @@ const ResultsBubble = memo(function ResultsBubble({ message, onGenerateNotices, 
           }
         </Button>
       </Box>
+
+      {/* Collection Officer Details Dialog */}
+      <Dialog open={officerDialogOpen} onClose={() => setOfficerDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Collection Officer Details</DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '16px !important' }}>
+          <TextField
+            label="Officer Name"
+            value={officerName}
+            onChange={(e) => setOfficerName(e.target.value)}
+            fullWidth
+            size="small"
+            autoFocus
+          />
+          <TextField
+            label="Officer Phone Number"
+            value={officerPhone}
+            onChange={(e) => setOfficerPhone(e.target.value)}
+            fullWidth
+            size="small"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOfficerDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleOfficerSubmit}
+            disabled={!officerName.trim() || !officerPhone.trim()}
+          >
+            Generate
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 });

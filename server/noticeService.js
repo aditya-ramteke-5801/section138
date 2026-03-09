@@ -29,7 +29,7 @@ function getConsequenceEmphasis(caseData) {
   return hints;
 }
 
-async function generateNoticeContent(caseData) {
+async function generateNoticeContent(caseData, officerDetails = {}) {
   const dpd = parseInt(caseData['DPD']) || 0;
   const { tone, instruction: toneInstruction } = getToneBucket(dpd);
   const emphasisHints = getConsequenceEmphasis(caseData);
@@ -64,14 +64,14 @@ BORROWER DATA:
 
 Return a JSON object with these exact keys:
 {
-  "bodyParagraphs": "<p>Opening paragraph: Under instructions from our client Slice (NorthStar Fintech Pvt. Ltd.), an RBI-registered NBFC...</p><p>Loan background: borrower approached lender, assured repayment, loan disbursed...</p><p>Default allegation: borrower availed loan, failed to repay...</p><p>Outstanding demand: specific figures, demand payment...</p>",
+  "bodyParagraphs": "<p>Under instructions from our client Slice (NorthStar Fintech Pvt. Ltd.), an RBI-registered NBFC, we hereby serve this legal notice upon you...</p><p>You had approached our client seeking a loan facility and assured timely repayment. Based on your representations, the loan was duly disbursed...</p><p>Despite repeated reminders, you have failed to honour your repayment obligations...</p><p>The total outstanding amount due and payable is ₹X. You are called upon to pay immediately...</p>",
   "consequences": "<li>Criminal complaint at nearest police station for cheating</li><li>Declare as wilful defaulter</li><li>Section 138 proceedings for cheque/NACH bounce — imprisonment up to 2 years</li><li>Arbitration proceedings and asset attachment</li><li>Salary and bank account attachment</li><li>CIBIL reporting — no future loans</li>",
   "deadline": "You are hereby called upon to pay all overdue amounts within 7 days...",
-  "pocContact": "For further assistance, please contact our client's officer, Sonu Singh, at 9187525893 between 10 AM and 6 PM on any working day."
+  "pocContact": "For further assistance, please contact our client's officer, ${officerDetails.name || 'the assigned officer'}, at ${officerDetails.phone || ''} between 10 AM and 6 PM on any working day."
 }
 
 RULES:
-- bodyParagraphs: Write 3-4 <p> tags. Personalise with borrower name, outstanding amount, DPD. Adjust tone per instructions.
+- bodyParagraphs: Write 3-4 <p> tags. Personalise with borrower name, outstanding amount, DPD. Adjust tone per instructions. Do NOT include labels like "Opening paragraph:", "Loan background:", etc. — write the actual legal notice prose directly.
 - consequences: Write 6-8 <li> tags. Emphasise based on case data hints. Each consequence should be a complete sentence.
 - deadline: One sentence with 7-day deadline.
 - pocContact: One sentence with contact details.
@@ -79,7 +79,7 @@ RULES:
 - Return valid JSON only, no markdown fences.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     temperature: 0.3,
     max_tokens: 2000,
     response_format: { type: 'json_object' },
@@ -98,7 +98,7 @@ RULES:
 <p><br></p>
 <p>To,</p>
 <p><strong>${borrowerName}</strong></p>
-<p>${address}${pinCode ? ', ' + pinCode : ''}</p>
+<p>${[address, pinCode].filter(Boolean).join(', ')}</p>
 <p>${phone}</p>
 <p><br></p>
 <p class="ql-align-center"><strong><u>SUB: LEGAL NOTICE FOR YOUR LOAN ACCOUNT: ${loanNumber}</u></strong></p>
@@ -133,7 +133,7 @@ ${sections.bodyParagraphs}
 
 async function aiEditNotice(currentContent, prompt) {
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     temperature: 0.3,
     max_tokens: 3000,
     messages: [
@@ -153,7 +153,7 @@ async function aiEditNotice(currentContent, prompt) {
 
 async function generateEmailBody(noticeContent, borrowerName, totalOutstanding, loanNumber) {
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     temperature: 0.3,
     max_tokens: 500,
     messages: [

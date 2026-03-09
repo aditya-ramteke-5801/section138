@@ -211,14 +211,14 @@ export default function App() {
     }
   };
 
-  const handleGenerateNotices = useCallback(async (selectedRows) => {
+  const handleGenerateNotices = useCallback(async (selectedRows, officerDetails) => {
     if (!selectedRows || selectedRows.length === 0) return;
 
     setGeneratingNotices(true);
     setGenerationProgress({ current: 0, total: selectedRows.length });
 
     try {
-      const result = await generateNotices(selectedRows);
+      const result = await generateNotices(selectedRows, officerDetails);
       setGeneratingNotices(false);
 
       addMessage({

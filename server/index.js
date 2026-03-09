@@ -3,7 +3,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const express = require('express');
 const cors = require('cors');
 const { loadCSV, getAllCases, getColumnNames, getColumnContext } = require('./dataLoader');
-const { applyFilters } = require('./filterEngine');
+const { applyFilters, validateFilters } = require('./filterEngine');
 const {
   parseQueryAndGenerateQuestions, generateFilterObject,
   handleFollowUp, generateExplanation,
@@ -43,6 +43,8 @@ app.post('/api/parse-query', async (req, res) => {
 
     const columnContext = getColumnContext();
     const result = await parseQueryAndGenerateQuestions(query, columnContext);
+    // Validate filter field names before sending to client
+    result.filters = validateFilters(result.filters || [], getColumnNames());
     res.json(result);
   } catch (err) {
     console.error('Parse query error:', err);
@@ -55,11 +57,12 @@ app.post('/api/run-query', async (req, res) => {
   try {
     const { filters: originalFilters, questions, answers } = req.body;
 
-    const { filters: finalFilters } = await generateFilterObject(
+    const { filters: rawFilters } = await generateFilterObject(
       originalFilters, questions || [], answers || {}
     );
 
     const allCases = getAllCases();
+    const finalFilters = validateFilters(rawFilters, getColumnNames());
     const filtered = applyFilters(allCases, finalFilters);
     const sampleStats = computeSampleStats(filtered);
     const explanation = await generateExplanation(
@@ -95,7 +98,7 @@ app.post('/api/follow-up', async (req, res) => {
       res.json({ ...result, breakdown });
     } else if (result.type === 'filter') {
       // Always use the complete filter list returned by AI (replace_all)
-      const newFilters = result.filters || [];
+      const newFilters = validateFilters(result.filters || [], getColumnNames());
       const filtered = applyFilters(allCases, newFilters);
       const sampleStats = computeSampleStats(filtered);
       const explanation = await generateExplanation(
@@ -206,7 +209,7 @@ function computeSampleStats(cases) {
 // Handler for generate-notices (shared by both route paths)
 async function handleGenerateNotices(req, res) {
   try {
-    const { cases: selectedCases } = req.body;
+    const { cases: selectedCases, officerDetails } = req.body;
     if (!selectedCases || !Array.isArray(selectedCases) || selectedCases.length === 0) {
       return res.status(400).json({ error: 'No cases provided' });
     }
@@ -215,7 +218,7 @@ async function handleGenerateNotices(req, res) {
     for (let i = 0; i < selectedCases.length; i++) {
       const caseData = selectedCases[i];
       try {
-        const { content, tone, referenceId } = await generateNoticeContent(caseData);
+        const { content, tone, referenceId } = await generateNoticeContent(caseData, officerDetails);
         const notice = createNotice({
           borrower_case_id: caseData['Loan Number'] || i,
           borrower_name: caseData['Name'] || '',

@@ -74,8 +74,17 @@ Available columns in the dataset (with fill rates):
 ${columnInfo}
 ${emptyColumns.length > 0 ? `\nWARNING - These columns are EMPTY (0% data), NEVER filter on them: ${emptyColumns.join(', ')}` : ''}
 
-Given a user's natural language query, extract structured filters and generate exactly 2-3 clarification questions.
+Your job: Understand ANY user query about picking cases — from very specific to completely vague — extract filters where possible, and ask 2-3 smart clarification questions tailored to what they asked.
+
 IMPORTANT: Only filter on columns that have data (>0% fill rate). If user mentions "outstanding" or "POS", use "Amount Pending" instead since POS is empty.
+
+## Handling different query types:
+
+1. **Specific queries** (e.g. "DPD above 90 in Maharashtra"): Extract exact filters. Ask 2-3 questions about dimensions they DIDN'T mention.
+2. **Partially specific** (e.g. "high DPD cases", "big defaulters"): Extract what you can (e.g. DPD > 90 for "high DPD"). Ask questions to pin down the vague parts.
+3. **Outcome-driven queries** (e.g. "which cases should I pick?", "best cases for legal notice", "cases most likely to recover"): Don't add filters yet. Ask questions to understand their strategy/priority.
+4. **Multi-criteria queries** (e.g. "high DPD, high POS cases", "old overdue cases with no contact"): Extract all mentioned criteria as filters. Ask about thresholds or missing dimensions.
+5. **Exclusion queries** (e.g. "skip cases already contacted", "exclude settled cases"): Use not_equals/not_in/is_empty operators. Ask about what else to exclude.
 
 Return JSON:
 {
@@ -94,14 +103,52 @@ Return JSON:
   "understanding": "One-line summary of what user wants"
 }
 
-IMPORTANT RULES:
-- Generate exactly 2 or 3 questions, no more
-- Each question MUST have 2-4 predefined options (no free text questions)
+## Question generation rules:
+- Generate exactly 2 or 3 questions, NO MORE
+- Questions must be RELEVANT to what the user asked — do NOT ask generic questions
+- Each question MUST have 2-4 predefined options (no free text)
+- Questions should help NARROW DOWN the selection, not repeat what the user already specified
+- If the user already specified a dimension (e.g. DPD > 90), do NOT ask about that dimension again
+
+## Examples of good question generation:
+
+Query: "What cases should I pick for legal notices?"
+→ No filters (too vague). Questions should ask about their priority:
+  q1: "What's your primary selection criteria?" → ["High overdue amount", "High DPD (days past due)", "Both high amount and high DPD", "Cases with no prior contact"]
+  q2: "How many cases are you looking to pick?" → ["Top 50", "Top 100", "Top 300", "All qualifying"]
+
+Query: "Give me high DPD, high POS cases"
+→ Filters: DPD > 90, Amount Pending > 50000 (reasonable defaults). Questions:
+  q1: "What DPD threshold counts as 'high' for you?" → ["60+ days", "90+ days", "120+ days", "180+ days"]
+  q2: "What's the minimum outstanding amount you'd consider 'high'?" → ["Above ₹25,000", "Above ₹50,000", "Above ₹1,00,000", "Above ₹2,00,000"]
+
+Query: "DPD above 120 in Maharashtra"
+→ Filters: DPD > 120, State = Maharashtra. Questions:
+  q1: "Any minimum outstanding amount to filter by?" → ["No minimum", "Above ₹25,000", "Above ₹50,000", "Above ₹1,00,000"]
+  q2: "Should we exclude cases that have already been contacted?" → ["Yes, exclude contacted", "No, include all", "Only those contacted 3+ times with no response"]
+
+Query: "Cases where borrower is not responding"
+→ Filters: Call Sent count greater_than 3, Latest Disposition contains "no answer" or similar. Questions:
+  q1: "How many contact attempts should count as 'not responding'?" → ["2+ attempts", "3+ attempts", "5+ attempts"]
+  q2: "Any minimum DPD for these non-responding cases?" → ["No minimum", "30+ days", "60+ days", "90+ days"]
+
+Query: "Cases with no prior contact"
+→ Filters: Call Sent count equals 0 (NOT is_empty — the column has "0" not blank). Questions:
+  q1: "What's the minimum DPD for uncontacted cases?" → ["No minimum", "30+ days", "60+ days", "90+ days"]
+  q2: "Any minimum outstanding amount?" → ["No minimum", "Above ₹25,000", "Above ₹50,000", "Above ₹1,00,000"]
+
+Query: "Pick 200 strongest cases"
+→ No filters. Questions:
+  q1: "What makes a case 'strong' for you?" → ["Highest overdue amount", "Highest DPD", "High amount + high DPD both", "Has contact info + high DPD"]
+  q2: "Any specific states or regions to focus on?" → ["All India", "Metro cities only", "Specific state(s)", "Doesn't matter"]
+
+## Other rules:
 - Map user terms correctly: "overdue"/"days past due"→DPD, "outstanding"/"principal"/"POS"→"Amount Pending" (POS column is empty!), "pending"→"Amount Pending"
 - NEVER use POS or EMI columns — they have no data. Use "Amount Pending" for any amount-related filters.
-- Questions should cover: DPD threshold, geography, amount ranges, contact history, exclusions
 - Use exact column names from the list above
-- For numeric values, always use numbers not strings (e.g. 90 not "90")`
+- For numeric values, always use numbers not strings (e.g. 90 not "90")
+- IMPORTANT: "is_empty" checks for BLANK/MISSING cells, NOT zero values. For "no contact" or "not contacted", use "Call Sent count" equals 0 or less_than_or_equal 0, NOT is_empty. Similarly, for any numeric field where you want to check for zero, use equals 0.
+- "is_empty"/"is_not_empty" should ONLY be used when checking if a field has any value at all (e.g. "has an address" → Primary Address is_not_empty). Most numeric columns are fully filled — they will have "0" not blank.`
       },
       { role: 'user', content: query }
     ]
@@ -206,7 +253,7 @@ async function generateExplanation(filterSummary, resultCount, totalCount, sampl
     messages: [
       {
         role: 'system',
-        content: `You are a legal operations assistant. Generate a brief (2-3 sentences) explanation of the filtered results for legal notice candidates. Be factual and concise.`
+        content: `You are a legal operations assistant for an Indian lending company. Generate a brief (2-3 sentences) explanation of the filtered results for legal notice candidates. Be factual and concise. IMPORTANT: Always use ₹ (Indian Rupees) for currency, never $ or USD.`
       },
       {
         role: 'user',

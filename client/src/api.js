@@ -70,8 +70,8 @@ export async function getBreakdown(filters, field) {
 
 // Phase 2: Notice endpoints
 
-export async function generateNotices(cases) {
-  const { data } = await api.post('/generate-notices', { cases });
+export async function generateNotices(cases, officerDetails) {
+  const { data } = await api.post('/generate-notices', { cases, officerDetails });
   return data;
 }
 
