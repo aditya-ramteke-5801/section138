@@ -68,15 +68,39 @@ export async function getBreakdown(filters, field) {
   return data;
 }
 
-// Phase 2: Notice endpoints
+// Campaign endpoints
 
-export async function generateNotices(cases, officerDetails) {
-  const { data } = await api.post('/generate-notices', { cases, officerDetails });
+export async function createCampaign(name, filters_used) {
+  const { data } = await api.post('/campaigns', { name, filters_used });
   return data;
 }
 
-export async function getNotices(status) {
-  const params = status ? { status } : {};
+export async function getCampaigns() {
+  const { data } = await api.get('/campaigns');
+  return data;
+}
+
+export async function getCampaign(id) {
+  const { data } = await api.get(`/campaigns/${id}`);
+  return data;
+}
+
+export async function updateCampaign(id, updates) {
+  const { data } = await api.put(`/campaigns/${id}`, updates);
+  return data;
+}
+
+// Phase 2: Notice endpoints
+
+export async function generateNotices(cases, officerDetails, campaignId) {
+  const { data } = await api.post('/generate-notices', { cases, officerDetails, campaign_id: campaignId });
+  return data;
+}
+
+export async function getNotices(status, campaignId) {
+  const params = {};
+  if (status) params.status = status;
+  if (campaignId) params.campaign_id = campaignId;
   const { data } = await api.get('/notices', { params });
   return data;
 }

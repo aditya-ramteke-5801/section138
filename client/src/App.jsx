@@ -1,19 +1,22 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   AppBar, Toolbar, Typography, Box, TextField, IconButton,
-  CircularProgress, ToggleButtonGroup, ToggleButton, Button, Badge,
-  LinearProgress,
+  CircularProgress, Button, LinearProgress,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
-import GavelIcon from '@mui/icons-material/Gavel';
-import ListAltIcon from '@mui/icons-material/ListAlt';
-import ChatIcon from '@mui/icons-material/Chat';
 import ChatMessage from './components/ChatMessage';
 import NoticeDashboard from './components/NoticeDashboard';
 import NoticeEditor from './components/NoticeEditor';
-import { parseQuery, runQuery, followUp, generateNotices, getNotices } from './api';
+import CampaignDashboard from './components/CampaignDashboard';
+import UserSwitcher from './components/UserSwitcher';
+import {
+  parseQuery, runQuery, followUp,
+  generateNotices, createCampaign, getCampaign,
+} from './api';
+import dpdzeroLogo from './assets/dpdzero-logo.png';
 
 export default function App() {
+  // Chat state
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
@@ -30,15 +33,16 @@ export default function App() {
   const [originalFilters, setOriginalFilters] = useState([]);
   const [cases, setCases] = useState(null);
   const [phase, setPhase] = useState('query'); // query | clarifying | results
-  const [selectedCaseIds, setSelectedCaseIds] = useState([]);
 
-  // Phase 2 state
-  const [view, setView] = useState('picker'); // picker | dashboard | editor
-  const [userRole, setUserRole] = useState('legal_ops'); // legal_ops | lawyer
+  // Navigation state
+  // Legal ops views: campaigns | campaign-notices | picker | editor
+  // Lawyer views: lawyer-notices | editor
+  const [view, setView] = useState('campaigns');
+  const [userRole, setUserRole] = useState('legal_ops');
   const [editingNoticeId, setEditingNoticeId] = useState(null);
-  const [noticeCount, setNoticeCount] = useState(0);
+  const [activeCampaignId, setActiveCampaignId] = useState(null);
+  const [activeCampaignName, setActiveCampaignName] = useState('');
   const [generatingNotices, setGeneratingNotices] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0 });
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -47,16 +51,74 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Fetch notice count for badge
-  useEffect(() => {
-    if (view === 'picker') {
-      getNotices().then(data => setNoticeCount(data.notices?.length || 0)).catch(() => {});
-    }
-  }, [view]);
+  // When role changes, go to default view
+  const handleRoleChange = (role) => {
+    setUserRole(role);
+    setEditingNoticeId(null);
+    setView(role === 'lawyer' ? 'lawyer-notices' : 'campaigns');
+  };
 
   const addMessage = (msg) => {
     setMessages(prev => [...prev, { id: Date.now() + Math.random(), ...msg }]);
   };
+
+  const resetChatState = () => {
+    setMessages([{
+      id: 'welcome',
+      role: 'assistant',
+      type: 'text',
+      content: 'Hi! Describe the borrower cases you want to pick for legal notices. For example: "Pick all borrowers in Maharashtra with DPD > 90 and outstanding above 50,000"',
+    }]);
+    setInput('');
+    setFilters([]);
+    setPendingQuestions([]);
+    setAnswers({});
+    setOriginalFilters([]);
+    setCases(null);
+    setPhase('query');
+  };
+
+  const handleNewCampaign = () => {
+    setActiveCampaignId(null);
+    setActiveCampaignName('');
+    resetChatState();
+    setView('picker');
+  };
+
+  const handleOpenCampaign = (campaign) => {
+    setActiveCampaignId(campaign.id);
+    setActiveCampaignName(campaign.name);
+    setView('campaign-notices');
+  };
+
+  const handleAddMoreCases = () => {
+    resetChatState();
+    setView('picker');
+  };
+
+  const handleEditNotice = (noticeId) => {
+    setEditingNoticeId(noticeId);
+    setView('editor');
+  };
+
+  const handleBackFromEditor = () => {
+    setEditingNoticeId(null);
+    if (userRole === 'lawyer') {
+      setView('lawyer-notices');
+    } else if (activeCampaignId) {
+      setView('campaign-notices');
+    } else {
+      setView('campaigns');
+    }
+  };
+
+  const handleBackFromNotices = () => {
+    setActiveCampaignId(null);
+    setActiveCampaignName('');
+    setView('campaigns');
+  };
+
+  // === Chat handlers ===
 
   const handleSend = async () => {
     const text = input.trim();
@@ -119,6 +181,11 @@ export default function App() {
   };
 
   const handleOptionSelect = useCallback(async (question, option, questionIndex) => {
+    setMessages(prev => prev.map(msg =>
+      msg.type === 'question' && msg.question?.id === question.id
+        ? { ...msg, answered: true }
+        : msg
+    ));
     addMessage({ role: 'user', type: 'text', content: option });
 
     const newAnswers = { ...answers, [question.id]: option };
@@ -215,20 +282,30 @@ export default function App() {
     if (!selectedRows || selectedRows.length === 0) return;
 
     setGeneratingNotices(true);
-    setGenerationProgress({ current: 0, total: selectedRows.length });
 
     try {
-      const result = await generateNotices(selectedRows, officerDetails);
+      // Create campaign if needed
+      let campaignId = activeCampaignId;
+      if (!campaignId) {
+        const campaign = await createCampaign(null, filters);
+        campaignId = campaign.id;
+        setActiveCampaignId(campaign.id);
+        setActiveCampaignName(campaign.name);
+      }
+
+      const result = await generateNotices(selectedRows, officerDetails, campaignId);
       setGeneratingNotices(false);
 
       addMessage({
         role: 'assistant',
         type: 'text',
-        content: `Generated ${result.generated} notice${result.generated !== 1 ? 's' : ''} successfully${result.failed > 0 ? ` (${result.failed} failed)` : ''}. Switch to the Notice Dashboard to view and edit them.`,
+        content: `Generated ${result.generated} notice${result.generated !== 1 ? 's' : ''} successfully${result.failed > 0 ? ` (${result.failed} failed)` : ''}. You can now view them in the campaign.`,
       });
 
-      // Update notice count
-      getNotices().then(data => setNoticeCount(data.notices?.length || 0)).catch(() => {});
+      // Navigate to the campaign notices
+      setTimeout(() => {
+        setView('campaign-notices');
+      }, 1500);
     } catch (err) {
       setGeneratingNotices(false);
       addMessage({
@@ -237,70 +314,177 @@ export default function App() {
         content: `Failed to generate notices: ${err.response?.data?.error || err.message}`,
       });
     }
-  }, []);
+  }, [activeCampaignId, filters]);
 
-  const handleEditNotice = (noticeId) => {
-    setEditingNoticeId(noticeId);
-    setView('editor');
+  // === Render ===
+
+  const renderContent = () => {
+    if (view === 'editor' && editingNoticeId) {
+      return (
+        <NoticeEditor
+          noticeId={editingNoticeId}
+          onBack={handleBackFromEditor}
+          userRole={userRole}
+        />
+      );
+    }
+
+    if (view === 'campaigns') {
+      return (
+        <CampaignDashboard
+          onNewCampaign={handleNewCampaign}
+          onOpenCampaign={handleOpenCampaign}
+        />
+      );
+    }
+
+    if (view === 'campaign-notices') {
+      return (
+        <NoticeDashboard
+          onEditNotice={handleEditNotice}
+          userRole={userRole}
+          campaignId={activeCampaignId}
+          campaignName={activeCampaignName}
+          onBack={handleBackFromNotices}
+          onAddMoreCases={handleAddMoreCases}
+        />
+      );
+    }
+
+    if (view === 'lawyer-notices') {
+      return (
+        <NoticeDashboard
+          onEditNotice={handleEditNotice}
+          userRole={userRole}
+        />
+      );
+    }
+
+    // view === 'picker'
+    return (
+      <>
+        {/* Chat messages area */}
+        <Box sx={{
+          flex: 1, overflowY: 'auto', px: 2, py: 2,
+          display: 'flex', flexDirection: 'column', gap: 1.5,
+        }}>
+          {messages.map(msg => (
+            <ChatMessage
+              key={msg.id}
+              message={msg}
+              onOptionSelect={handleOptionSelect}
+              onGenerateNotices={handleGenerateNotices}
+              loading={loading}
+              generatingNotices={generatingNotices}
+            />
+          ))}
+          {loading && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
+              <CircularProgress size={18} sx={{ color: 'primary.main' }} />
+              <Typography variant="body2" color="text.secondary">Thinking...</Typography>
+            </Box>
+          )}
+          <div ref={messagesEndRef} />
+        </Box>
+
+        {/* Input area */}
+        <Box sx={{
+          p: 2, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper',
+          display: 'flex', gap: 1, alignItems: 'flex-end',
+        }}>
+          <TextField
+            inputRef={inputRef}
+            fullWidth
+            multiline
+            maxRows={4}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={
+              phase === 'query'
+                ? 'Describe the cases you want to pick...'
+                : phase === 'clarifying'
+                ? 'Or type your own answer...'
+                : 'Ask a follow-up: "breakdown by state", "filter DPD > 120", "start over"...'
+            }
+            variant="outlined"
+            size="small"
+            disabled={loading}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (phase === 'clarifying') {
+                  const text = input.trim();
+                  if (!text) return;
+                  const unansweredIdx = Object.keys(answers).length;
+                  if (unansweredIdx < pendingQuestions.length) {
+                    const q = pendingQuestions[unansweredIdx];
+                    setInput('');
+                    handleOptionSelect(q, text, unansweredIdx);
+                  }
+                } else {
+                  handleSend();
+                }
+              }
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': { borderRadius: 3 },
+            }}
+          />
+          <IconButton
+            color="primary"
+            onClick={() => {
+              if (phase === 'clarifying') {
+                const text = input.trim();
+                if (!text) return;
+                const unansweredIdx = Object.keys(answers).length;
+                if (unansweredIdx < pendingQuestions.length) {
+                  const q = pendingQuestions[unansweredIdx];
+                  setInput('');
+                  handleOptionSelect(q, text, unansweredIdx);
+                }
+              } else {
+                handleSend();
+              }
+            }}
+            disabled={loading || !input.trim()}
+            sx={{
+              bgcolor: 'primary.main', color: 'white', borderRadius: 2,
+              '&:hover': { bgcolor: 'primary.dark' },
+              '&.Mui-disabled': { bgcolor: 'grey.300', color: 'grey.500' },
+              width: 40, height: 40,
+            }}
+          >
+            <SendIcon fontSize="small" />
+          </IconButton>
+        </Box>
+      </>
+    );
   };
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
       <AppBar position="static" elevation={0} sx={{ bgcolor: 'primary.dark' }}>
         <Toolbar sx={{ gap: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: 1 }}>
-            DPDzero
-          </Typography>
+          <img
+            src={dpdzeroLogo}
+            alt="DPDzero"
+            style={{ height: 32, cursor: 'pointer' }}
+            onClick={() => {
+              if (userRole === 'lawyer') {
+                setView('lawyer-notices');
+              } else {
+                setView('campaigns');
+              }
+              setEditingNoticeId(null);
+            }}
+          />
           <Typography variant="body1" sx={{ opacity: 0.8 }}>
             Legal Notice System
           </Typography>
 
           <Box sx={{ flex: 1 }} />
 
-          {/* View switcher */}
-          <ToggleButtonGroup
-            value={view}
-            exclusive
-            onChange={(_, v) => { if (v) { setView(v); setEditingNoticeId(null); } }}
-            size="small"
-            sx={{
-              '& .MuiToggleButton-root': {
-                color: 'rgba(255,255,255,0.7)', borderColor: 'rgba(255,255,255,0.3)',
-                '&.Mui-selected': { color: 'white', bgcolor: 'rgba(255,255,255,0.15)' },
-              },
-            }}
-          >
-            <ToggleButton value="picker"><ChatIcon sx={{ mr: 0.5 }} fontSize="small" />Case Picker</ToggleButton>
-            <ToggleButton value="dashboard">
-              <Badge badgeContent={noticeCount} color="error" max={999} sx={{ '& .MuiBadge-badge': { fontSize: '0.65rem' } }}>
-                <ListAltIcon sx={{ mr: 0.5 }} fontSize="small" />
-              </Badge>
-              Notices
-            </ToggleButton>
-          </ToggleButtonGroup>
-
-          {/* Role switcher — close notice editor when switching role */}
-          <ToggleButtonGroup
-            value={userRole}
-            exclusive
-            onChange={(_, r) => {
-              if (r) {
-                setUserRole(r);
-                setEditingNoticeId(null);
-                if (view === 'editor') setView('dashboard');
-              }
-            }}
-            size="small"
-            sx={{
-              '& .MuiToggleButton-root': {
-                color: 'rgba(255,255,255,0.7)', borderColor: 'rgba(255,255,255,0.3)',
-                '&.Mui-selected': { color: 'white', bgcolor: 'rgba(255,255,255,0.15)' },
-              },
-            }}
-          >
-            <ToggleButton value="legal_ops">Legal Ops</ToggleButton>
-            <ToggleButton value="lawyer">Lawyer</ToggleButton>
-          </ToggleButtonGroup>
+          <UserSwitcher userRole={userRole} onRoleChange={handleRoleChange} />
         </Toolbar>
       </AppBar>
 
@@ -315,112 +499,7 @@ export default function App() {
       )}
 
       {/* Main content */}
-      {view === 'editor' && editingNoticeId ? (
-        <NoticeEditor
-          noticeId={editingNoticeId}
-          onBack={() => setView('dashboard')}
-          userRole={userRole}
-        />
-      ) : view === 'dashboard' ? (
-        <NoticeDashboard onEditNotice={handleEditNotice} userRole={userRole} />
-      ) : (
-        <>
-          {/* Chat messages area */}
-          <Box sx={{
-            flex: 1, overflowY: 'auto', px: 2, py: 2,
-            display: 'flex', flexDirection: 'column', gap: 1.5,
-          }}>
-            {messages.map(msg => (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                onOptionSelect={handleOptionSelect}
-                onGenerateNotices={handleGenerateNotices}
-                loading={loading}
-                generatingNotices={generatingNotices}
-              />
-            ))}
-            {loading && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
-                <CircularProgress size={18} sx={{ color: 'primary.main' }} />
-                <Typography variant="body2" color="text.secondary">Thinking...</Typography>
-              </Box>
-            )}
-            <div ref={messagesEndRef} />
-          </Box>
-
-          {/* Input area */}
-          <Box sx={{
-            p: 2, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper',
-            display: 'flex', gap: 1, alignItems: 'flex-end',
-          }}>
-            <TextField
-              inputRef={inputRef}
-              fullWidth
-              multiline
-              maxRows={4}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={
-                phase === 'query'
-                  ? 'Describe the cases you want to pick...'
-                  : phase === 'clarifying'
-                  ? 'Or type your own answer...'
-                  : 'Ask a follow-up: "breakdown by state", "filter DPD > 120", "start over"...'
-              }
-              variant="outlined"
-              size="small"
-              disabled={loading}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  if (phase === 'clarifying') {
-                    const text = input.trim();
-                    if (!text) return;
-                    const unansweredIdx = Object.keys(answers).length;
-                    if (unansweredIdx < pendingQuestions.length) {
-                      const q = pendingQuestions[unansweredIdx];
-                      setInput('');
-                      handleOptionSelect(q, text, unansweredIdx);
-                    }
-                  } else {
-                    handleSend();
-                  }
-                }
-              }}
-              sx={{
-                '& .MuiOutlinedInput-root': { borderRadius: 3 },
-              }}
-            />
-            <IconButton
-              color="primary"
-              onClick={() => {
-                if (phase === 'clarifying') {
-                  const text = input.trim();
-                  if (!text) return;
-                  const unansweredIdx = Object.keys(answers).length;
-                  if (unansweredIdx < pendingQuestions.length) {
-                    const q = pendingQuestions[unansweredIdx];
-                    setInput('');
-                    handleOptionSelect(q, text, unansweredIdx);
-                  }
-                } else {
-                  handleSend();
-                }
-              }}
-              disabled={loading || !input.trim()}
-              sx={{
-                bgcolor: 'primary.main', color: 'white', borderRadius: 2,
-                '&:hover': { bgcolor: 'primary.dark' },
-                '&.Mui-disabled': { bgcolor: 'grey.300', color: 'grey.500' },
-                width: 40, height: 40,
-              }}
-            >
-              <SendIcon fontSize="small" />
-            </IconButton>
-          </Box>
-        </>
-      )}
+      {renderContent()}
     </Box>
   );
 }

@@ -42,6 +42,7 @@ function ChatMessage({ message, onOptionSelect, onGenerateNotices, loading, gene
           totalQuestions={message.totalQuestions}
           onOptionSelect={onOptionSelect}
           disabled={loading}
+          alreadyAnswered={message.answered}
         />
       )}
       {type === 'results' && (
@@ -78,21 +79,21 @@ function TextBubble({ content, isUser }) {
   );
 }
 
-function QuestionBubble({ question, questionIndex, totalQuestions, onOptionSelect, disabled }) {
-  const [otherMode, setOtherMode] = useState(false);
+function QuestionBubble({ question, questionIndex, totalQuestions, onOptionSelect, disabled, alreadyAnswered }) {
   const [otherText, setOtherText] = useState('');
   const [answered, setAnswered] = useState(false);
 
+  const isAnswered = answered || alreadyAnswered;
+
   const handleClick = (option) => {
-    if (answered || disabled) return;
+    if (isAnswered || disabled) return;
     setAnswered(true);
     onOptionSelect(question, option, questionIndex);
   };
 
   const handleOtherSubmit = () => {
-    if (!otherText.trim() || answered || disabled) return;
+    if (!otherText.trim() || isAnswered || disabled) return;
     setAnswered(true);
-    setOtherMode(false);
     onOptionSelect(question, otherText.trim(), questionIndex);
   };
 
@@ -101,18 +102,20 @@ function QuestionBubble({ question, questionIndex, totalQuestions, onOptionSelec
       elevation={0}
       sx={{
         px: 2.5, py: 2,
-        bgcolor: 'white',
+        bgcolor: isAnswered ? 'grey.50' : 'white',
         borderRadius: 3,
         borderTopLeftRadius: 4,
         border: '1px solid',
         borderColor: 'grey.200',
         maxWidth: 500,
+        opacity: isAnswered ? 0.6 : 1,
+        transition: 'opacity 0.3s ease',
       }}
     >
       <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
         Question {questionIndex + 1} of {totalQuestions}
       </Typography>
-      <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+      <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, color: isAnswered ? 'text.disabled' : 'text.primary' }}>
         {question.text}
       </Typography>
       {question.reason && (
@@ -127,33 +130,24 @@ function QuestionBubble({ question, questionIndex, totalQuestions, onOptionSelec
             key={opt}
             label={opt}
             onClick={() => handleClick(opt)}
-            disabled={answered || disabled}
+            disabled={isAnswered || disabled}
             sx={{
-              cursor: answered ? 'default' : 'pointer',
+              cursor: isAnswered ? 'default' : 'pointer',
               fontWeight: 500,
-              bgcolor: answered ? 'grey.100' : 'primary.main',
-              color: answered ? 'text.disabled' : 'white',
-              '&:hover': answered ? {} : { bgcolor: 'primary.dark' },
+              bgcolor: isAnswered ? 'grey.100' : 'primary.main',
+              color: isAnswered ? 'text.disabled' : 'white',
+              '&:hover': isAnswered ? {} : { bgcolor: 'primary.dark' },
               '&.Mui-disabled': { opacity: 0.5 },
             }}
           />
         ))}
-        {!otherMode && !answered && (
-          <Chip
-            label="Other..."
-            variant="outlined"
-            onClick={() => setOtherMode(true)}
-            disabled={disabled}
-            sx={{ cursor: 'pointer', fontWeight: 500 }}
-          />
-        )}
       </Box>
 
-      {otherMode && !answered && (
+      {!isAnswered && (
         <Box sx={{ display: 'flex', gap: 1, mt: 1.5 }}>
           <TextField
             size="small"
-            placeholder="Type your answer..."
+            placeholder="Or type your own answer..."
             value={otherText}
             onChange={(e) => setOtherText(e.target.value)}
             onKeyDown={(e) => {
@@ -163,9 +157,9 @@ function QuestionBubble({ question, questionIndex, totalQuestions, onOptionSelec
               }
             }}
             sx={{ flex: 1 }}
-            autoFocus
+            disabled={disabled}
           />
-          <Button size="small" variant="contained" onClick={handleOtherSubmit} disabled={!otherText.trim()}>
+          <Button size="small" variant="contained" onClick={handleOtherSubmit} disabled={!otherText.trim() || disabled}>
             Send
           </Button>
         </Box>

@@ -177,10 +177,16 @@ Return JSON:
 {
   "filters": [
     { "field": "exact column name", "operator": "equals|not_equals|contains|greater_than|less_than|greater_than_or_equal|less_than_or_equal|between|in|not_in|is_empty|is_not_empty", "value": "value or {min,max} or [array]" }
-  ]
+  ],
+  "sort_field": "column name to sort by (optional, e.g. DPD or Amount Pending)",
+  "sort_order": "desc or asc (optional, default desc)",
+  "limit": number or null
 }
 
-If an answer modifies an existing filter, update it. If it adds a new constraint, add a filter.`
+If an answer modifies an existing filter, update it. If it adds a new constraint, add a filter.
+If user says "Top N" or a specific count, set "limit" to that number and "sort_field" to the most relevant column based on their criteria (e.g. "High DPD" → sort by "DPD", "High amount" → sort by "Amount Pending").
+Do NOT create filters for fields like "case_rank" or "rank" — those don't exist. Use limit + sort instead.
+IMPORTANT: "POS" column is empty, use "Amount Pending" for outstanding/POS/amount related sorting.`
       },
       {
         role: 'user',

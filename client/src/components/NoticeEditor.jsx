@@ -239,8 +239,7 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
     return <Typography sx={{ p: 3 }}>Notice not found.</Typography>;
   }
 
-  const isEditable = notice.status === 'draft' ||
-    (notice.status === 'pending_signature' && userRole === 'lawyer');
+  const isEditable = notice.status === 'draft' && userRole === 'legal_ops';
 
   return (
     <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' }}>
@@ -307,8 +306,8 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
           )}
         </Box>
 
-        {/* Right: AI prompt panel */}
-        <Box sx={{
+        {/* Right: AI prompt panel (hidden for lawyer) */}
+        {userRole !== 'lawyer' && <Box sx={{
           flex: 1, minWidth: 320, maxWidth: 400, borderLeft: '1px solid', borderColor: 'divider',
           display: 'flex', flexDirection: 'column', bgcolor: 'background.paper',
         }}>
@@ -346,7 +345,20 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
             </Typography>
             <List dense>
               {notice.edit_history.slice().reverse().map((entry, i) => (
-                <ListItem key={i} sx={{ px: 1, py: 0.5 }}>
+                <ListItem
+                  key={i}
+                  sx={{
+                    px: 1, py: 0.5,
+                    cursor: entry.type === 'ai_prompt' ? 'pointer' : 'default',
+                    borderRadius: 1,
+                    '&:hover': entry.type === 'ai_prompt' ? { bgcolor: 'action.hover' } : {},
+                  }}
+                  onClick={() => {
+                    if (entry.type === 'ai_prompt' && entry.prompt) {
+                      setAiPrompt(entry.prompt);
+                    }
+                  }}
+                >
                   <ListItemText
                     primary={entry.type === 'ai_prompt' ? entry.prompt : 'Manual edit'}
                     secondary={new Date(entry.timestamp).toLocaleString('en-IN')}
@@ -364,7 +376,7 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
               ))}
             </List>
           </Box>
-        </Box>
+        </Box>}
       </Box>
 
       {/* Bottom action bar */}

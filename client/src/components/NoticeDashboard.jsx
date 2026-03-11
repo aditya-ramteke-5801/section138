@@ -10,6 +10,8 @@ import EmailIcon from '@mui/icons-material/Email';
 import SendIcon from '@mui/icons-material/Send';
 import EditIcon from '@mui/icons-material/Edit';
 import SearchIcon from '@mui/icons-material/Search';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import AddIcon from '@mui/icons-material/Add';
 import { getNotices, bulkSendToLawyer, bulkDownload, bulkSendEmail } from '../api';
 
 const STATUS_COLORS = {
@@ -26,7 +28,7 @@ const STATUS_LABELS = {
   dispatched: 'Dispatched',
 };
 
-export default function NoticeDashboard({ onEditNotice, userRole }) {
+export default function NoticeDashboard({ onEditNotice, userRole, campaignId, campaignName, onBack, onAddMoreCases }) {
   const [notices, setNotices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
@@ -36,14 +38,14 @@ export default function NoticeDashboard({ onEditNotice, userRole }) {
   const fetchNotices = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getNotices(statusFilter || undefined);
+      const data = await getNotices(statusFilter || undefined, campaignId || undefined);
       setNotices(data.notices || []);
     } catch (err) {
       console.error('Failed to fetch notices:', err);
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, campaignId]);
 
   useEffect(() => { fetchNotices(); }, [fetchNotices]);
 
@@ -111,6 +113,40 @@ export default function NoticeDashboard({ onEditNotice, userRole }) {
 
   return (
     <Box sx={{ p: 3 }}>
+      {/* Campaign header with back button */}
+      {campaignId && onBack && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+          <IconButton size="small" onClick={onBack}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            {campaignName || 'Campaign'}
+          </Typography>
+          <Box sx={{ flex: 1 }} />
+          {userRole === 'legal_ops' && onAddMoreCases && (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={onAddMoreCases}
+              sx={{ borderRadius: 2 }}
+            >
+              Add More Cases
+            </Button>
+          )}
+        </Box>
+      )}
+
+      {/* Lawyer view header */}
+      {userRole === 'lawyer' && !campaignId && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>Notices for Review</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Review and sign pending legal notices
+          </Typography>
+        </Box>
+      )}
+
       {/* Filters and actions bar */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center', flexWrap: 'wrap' }}>
         <TextField

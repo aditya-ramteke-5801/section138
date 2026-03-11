@@ -20,6 +20,7 @@ function createNotice(data) {
     total_outstanding: data.total_outstanding || 0,
     emi: data.emi || 0,
     interest_rate: data.interest_rate || '',
+    campaign_id: data.campaign_id || null,
     notice_content: data.notice_content || '',
     tone: data.tone || 'moderate',
     nearest_police_station: data.nearest_police_station || '',
@@ -42,10 +43,13 @@ function getNotice(id) {
   return notices.get(id) || null;
 }
 
-function getAllNotices(statusFilter) {
+function getAllNotices(statusFilter, campaignId) {
   let result = Array.from(notices.values());
   if (statusFilter) {
     result = result.filter(n => n.status === statusFilter);
+  }
+  if (campaignId) {
+    result = result.filter(n => n.campaign_id === campaignId);
   }
   return result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }

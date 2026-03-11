@@ -9,6 +9,7 @@ const {
   handleFollowUp, generateExplanation,
 } = require('./openaiService');
 const { createNotice, getNotice, getAllNotices, updateNotice } = require('./noticeStore');
+const { createCampaign, getCampaign, getAllCampaigns, updateCampaign } = require('./campaignStore');
 const { generateNoticeContent, aiEditNotice, generateEmailBody, generateEmailSubject } = require('./noticeService');
 const { generatePdf } = require('./pdfService');
 const { sendNoticeEmail } = require('./emailService');
@@ -57,13 +58,33 @@ app.post('/api/run-query', async (req, res) => {
   try {
     const { filters: originalFilters, questions, answers } = req.body;
 
-    const { filters: rawFilters } = await generateFilterObject(
+    const aiResult = await generateFilterObject(
       originalFilters, questions || [], answers || {}
     );
+    const rawFilters = aiResult.filters || [];
+    const sortField = aiResult.sort_field || null;
+    const sortOrder = aiResult.sort_order === 'asc' ? 1 : -1;
+    const limit = parseInt(aiResult.limit) || null;
 
     const allCases = getAllCases();
     const finalFilters = validateFilters(rawFilters, getColumnNames());
-    const filtered = applyFilters(allCases, finalFilters);
+    let filtered = applyFilters(allCases, finalFilters);
+
+    // Sort if requested
+    if (sortField) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = parseFloat(a[sortField]) || 0;
+        const bVal = parseFloat(b[sortField]) || 0;
+        return (bVal - aVal) * sortOrder;
+      });
+    }
+
+    // Limit results if requested (e.g. "Top 300")
+    const totalFiltered = filtered.length;
+    if (limit && limit < filtered.length) {
+      filtered = filtered.slice(0, limit);
+    }
+
     const sampleStats = computeSampleStats(filtered);
     const explanation = await generateExplanation(
       finalFilters, filtered.length, allCases.length, sampleStats
@@ -182,10 +203,16 @@ function computeSampleStats(cases) {
   for (const field of numericFields) {
     const values = cases.map(c => parseFloat(c[field])).filter(v => !isNaN(v));
     if (values.length > 0) {
+      let min = values[0], max = values[0], sum = 0;
+      for (const v of values) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+        sum += v;
+      }
       stats[field] = {
-        min: Math.min(...values),
-        max: Math.max(...values),
-        avg: Math.round(values.reduce((a, b) => a + b, 0) / values.length),
+        min,
+        max,
+        avg: Math.round(sum / values.length),
         count: values.length,
       };
     }
@@ -204,12 +231,67 @@ function computeSampleStats(cases) {
   return stats;
 }
 
+// ============ CAMPAIGN Endpoints ============
+
+// POST /api/campaigns — create a new campaign
+app.post('/api/campaigns', (req, res) => {
+  const { name, filters_used } = req.body;
+  const campaign = createCampaign({ name, filters_used: filters_used || [] });
+  res.json(campaign);
+});
+
+// GET /api/campaigns — list all campaigns with computed stats
+app.get('/api/campaigns', (req, res) => {
+  const campaigns = getAllCampaigns();
+  const enriched = campaigns.map(c => {
+    const notices = getAllNotices(null, c.id);
+    return {
+      ...c,
+      stats: {
+        total: notices.length,
+        draft: notices.filter(n => n.status === 'draft').length,
+        pending_signature: notices.filter(n => n.status === 'pending_signature').length,
+        signed: notices.filter(n => n.status === 'signed').length,
+        dispatched: notices.filter(n => n.status === 'dispatched').length,
+        rejected: notices.filter(n => n.status === 'draft' && n.reject_comment).length,
+      },
+    };
+  });
+  res.json({ campaigns: enriched });
+});
+
+// GET /api/campaigns/:id — single campaign with stats
+app.get('/api/campaigns/:id', (req, res) => {
+  const campaign = getCampaign(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+  const notices = getAllNotices(null, campaign.id);
+  res.json({
+    ...campaign,
+    stats: {
+      total: notices.length,
+      draft: notices.filter(n => n.status === 'draft').length,
+      pending_signature: notices.filter(n => n.status === 'pending_signature').length,
+      signed: notices.filter(n => n.status === 'signed').length,
+      dispatched: notices.filter(n => n.status === 'dispatched').length,
+      rejected: notices.filter(n => n.status === 'draft' && n.reject_comment).length,
+    },
+  });
+});
+
+// PUT /api/campaigns/:id — update campaign
+app.put('/api/campaigns/:id', (req, res) => {
+  const campaign = getCampaign(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+  const updated = updateCampaign(req.params.id, req.body);
+  res.json(updated);
+});
+
 // ============ PHASE 2: Legal Notice Endpoints ============
 
 // Handler for generate-notices (shared by both route paths)
 async function handleGenerateNotices(req, res) {
   try {
-    const { cases: selectedCases, officerDetails } = req.body;
+    const { cases: selectedCases, officerDetails, campaign_id } = req.body;
     if (!selectedCases || !Array.isArray(selectedCases) || selectedCases.length === 0) {
       return res.status(400).json({ error: 'No cases provided' });
     }
@@ -220,6 +302,7 @@ async function handleGenerateNotices(req, res) {
       try {
         const { content, tone, referenceId } = await generateNoticeContent(caseData, officerDetails);
         const notice = createNotice({
+          campaign_id: campaign_id || null,
           borrower_case_id: caseData['Loan Number'] || i,
           borrower_name: caseData['Name'] || '',
           borrower_email: caseData['Email'] || caseData['email'] || '',
@@ -243,6 +326,15 @@ async function handleGenerateNotices(req, res) {
       }
     }
 
+    // Update campaign with new notice IDs
+    if (campaign_id) {
+      const campaign = getCampaign(campaign_id);
+      if (campaign) {
+        const newIds = results.filter(r => !r.error).map(r => r.id);
+        updateCampaign(campaign_id, { notice_ids: [...campaign.notice_ids, ...newIds] });
+      }
+    }
+
     res.json({ notices: results, generated: results.filter(r => !r.error).length, failed: results.filter(r => r.error).length });
   } catch (err) {
     console.error('Generate notices error:', err);
@@ -257,8 +349,8 @@ app.post('/generate-notices', handleGenerateNotices);
 
 // GET /api/notices — list all notices
 app.get('/api/notices', (req, res) => {
-  const { status } = req.query;
-  const notices = getAllNotices(status || null);
+  const { status, campaign_id } = req.query;
+  const notices = getAllNotices(status || null, campaign_id || null);
   res.json({ notices });
 });
 

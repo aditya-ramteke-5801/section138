@@ -9,7 +9,7 @@ let columnFillRates = {};
 
 function loadCSV() {
   return new Promise((resolve, reject) => {
-    const csvPath = path.join(__dirname, '..', '..', 'loan_data.csv');
+    const csvPath = path.join(__dirname, '..', '..', 'Slice Performance Jan 2025.csv');
     const rows = [];
 
     fs.createReadStream(csvPath)
