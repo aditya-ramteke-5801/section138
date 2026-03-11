@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box, Typography, Paper, Button, TextField, Chip, IconButton,
   CircularProgress, Divider, List, ListItem, ListItemText,
@@ -13,6 +13,10 @@ import DownloadIcon from '@mui/icons-material/Download';
 import EmailIcon from '@mui/icons-material/Email';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
+import {
+  getNotice, updateNoticeContent, aiEditNotice, sendToLawyer,
+  signNotice, rejectNotice, previewPdf, downloadPdf, sendEmail,
+} from '../api';
 
 const QUILL_MODULES_EDITABLE = {
   toolbar: [
@@ -25,11 +29,6 @@ const QUILL_MODULES_EDITABLE = {
 };
 
 const QUILL_MODULES_READONLY = { toolbar: false };
-import {
-  getNotice, updateNoticeContent, aiEditNotice, sendToLawyer,
-  signNotice, rejectNotice, previewPdf, downloadPdf, sendEmail,
-  fetchSignatureDataUrl,
-} from '../api';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -61,6 +60,10 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
   const [pdfError, setPdfError] = useState(null);
   const saveTimeoutRef = useRef(null);
 
+  const isEditable = notice
+    ? notice.status === 'draft' && userRole === 'legal_ops'
+    : false;
+
   useEffect(() => {
     loadNotice();
     return () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); };
@@ -79,10 +82,11 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
     }
   };
 
+  // Only auto-save when content is actually editable
   const handleContentChange = useCallback((content) => {
+    if (!isEditable) return; // Never save in read-only mode
     setNotice(prev => prev ? { ...prev, notice_content: content } : prev);
 
-    // Auto-save with debounce
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(async () => {
       try {
@@ -91,17 +95,7 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
         console.error('Auto-save failed:', err);
       }
     }, 1500);
-  }, [noticeId]);
-
-  const handleSave = async () => {
-    if (!notice) return;
-    setSaving(true);
-    try {
-      await updateNoticeContent(noticeId, notice.notice_content);
-    } finally {
-      setSaving(false);
-    }
-  };
+  }, [noticeId, isEditable]);
 
   const handleAiEdit = async () => {
     if (!aiPrompt.trim() || aiLoading) return;
@@ -121,12 +115,12 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
     setPdfError(null);
     setPdfLoading(true);
     try {
-      // Save first so PDF has latest content (including signature if signed)
-      await updateNoticeContent(noticeId, notice.notice_content);
+      if (isEditable) {
+        await updateNoticeContent(noticeId, notice.notice_content);
+      }
       const blob = await previewPdf(noticeId);
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-      const url = URL.createObjectURL(blob);
-      setPdfUrl(url);
+      setPdfUrl(URL.createObjectURL(blob));
     } catch (err) {
       console.error('PDF preview failed:', err);
       let msg = err.message || 'PDF preview failed';
@@ -161,7 +155,6 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
     try {
       await updateNoticeContent(noticeId, notice.notice_content);
       const updated = await sendToLawyer(noticeId);
-      // Preserve notice_content in case response omits or truncates it (e.g. large payload)
       setNotice(prev => ({
         ...updated,
         notice_content: updated.notice_content ?? prev?.notice_content ?? '',
@@ -174,25 +167,9 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
 
   const handleSign = async () => {
     try {
-      // Close PDF preview so user sees editor after sign (avoids blank/stale PDF)
       if (pdfUrl) {
         URL.revokeObjectURL(pdfUrl);
         setPdfUrl(null);
-      }
-      const content = notice.notice_content || '';
-      // Already has signature image (embedded data URL or URL reference)
-      const hasSignature = (content.includes('data:image/png;base64,') || content.includes('lawyer_signature')) && content.includes('Unnati Vashisth');
-      // Match lawyer block: <p><strong>Unnati Vashisth</strong></p> then optional whitespace then <p>(Advocate)</p>
-      const lawyerBlockRegex = /<p><strong>Unnati Vashisth<\/strong><\/p>\s*<p>\(Advocate\)<\/p>/;
-      if (!hasSignature && lawyerBlockRegex.test(content)) {
-        const dataUrl = await fetchSignatureDataUrl();
-        const signatureParagraph = `<p class="ql-align-left"><img src="${dataUrl}" alt="Signature" style="max-height: 80px; margin-bottom: 4px;" /></p>`;
-        const updatedContent = content.replace(
-          lawyerBlockRegex,
-          (match) => signatureParagraph + match
-        );
-        await updateNoticeContent(noticeId, updatedContent);
-        setNotice(prev => prev ? { ...prev, notice_content: updatedContent } : prev);
       }
       const updated = await signNotice(noticeId, 'Unnati Vashisth (Advocate)');
       setNotice(updated);
@@ -238,8 +215,6 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
   if (!notice) {
     return <Typography sx={{ p: 3 }}>Notice not found.</Typography>;
   }
-
-  const isEditable = notice.status === 'draft' && userRole === 'legal_ops';
 
   return (
     <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' }}>
@@ -292,91 +267,112 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
                   </Button>
                 </Box>
               )}
-              <Box sx={{ flex: 1, overflow: 'auto' }}>
-                <ReactQuill
-                  value={notice.notice_content}
-                  onChange={handleContentChange}
-                  readOnly={!isEditable}
-                  theme="snow"
-                  style={{ height: 'calc(100% - 42px)' }}
-                  modules={isEditable ? QUILL_MODULES_EDITABLE : QUILL_MODULES_READONLY}
+
+              {/* Editable: use Quill. Read-only: render plain HTML to avoid Quill mutations */}
+              {isEditable ? (
+                <Box sx={{ flex: 1, overflow: 'auto' }}>
+                  <ReactQuill
+                    value={notice.notice_content}
+                    onChange={handleContentChange}
+                    theme="snow"
+                    style={{ height: 'calc(100% - 42px)' }}
+                    modules={QUILL_MODULES_EDITABLE}
+                  />
+                </Box>
+              ) : (
+                <Box
+                  sx={{
+                    flex: 1, overflow: 'auto', px: 4, py: 3,
+                    fontFamily: "'Times New Roman', Times, serif",
+                    fontSize: '13px',
+                    lineHeight: 1.8,
+                    '& p': { margin: '4px 0' },
+                    '& ol': { margin: '10px 0 10px 20px' },
+                    '& ol li': { marginBottom: '8px' },
+                    '& .ql-align-center': { textAlign: 'center' },
+                    '& .ql-align-right': { textAlign: 'right' },
+                    '& .ql-align-justify': { textAlign: 'justify' },
+                  }}
+                  dangerouslySetInnerHTML={{ __html: notice.notice_content }}
                 />
-              </Box>
+              )}
             </Box>
           )}
         </Box>
 
         {/* Right: AI prompt panel (hidden for lawyer) */}
-        {userRole !== 'lawyer' && <Box sx={{
-          flex: 1, minWidth: 320, maxWidth: 400, borderLeft: '1px solid', borderColor: 'divider',
-          display: 'flex', flexDirection: 'column', bgcolor: 'background.paper',
-        }}>
-          <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>AI Edit Assistant</Typography>
-          </Box>
-
-          {isEditable && (
-            <Box sx={{ p: 2 }}>
-              <TextField
-                fullWidth multiline rows={3} size="small"
-                placeholder='e.g. "Make the tone stricter", "Add Section 138 reference", "Change deadline to 15 days"'
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                disabled={aiLoading}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiEdit(); } }}
-              />
-              <Button
-                fullWidth variant="contained" size="small" sx={{ mt: 1 }}
-                onClick={handleAiEdit}
-                disabled={!aiPrompt.trim() || aiLoading}
-                startIcon={aiLoading ? <CircularProgress size={16} /> : <SendIcon />}
-              >
-                {aiLoading ? 'Applying...' : 'Apply'}
-              </Button>
+        {userRole !== 'lawyer' && (
+          <Box sx={{
+            flex: 1, minWidth: 320, maxWidth: 400, borderLeft: '1px solid', borderColor: 'divider',
+            display: 'flex', flexDirection: 'column', bgcolor: 'background.paper',
+          }}>
+            <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>AI Edit Assistant</Typography>
             </Box>
-          )}
 
-          <Divider />
-
-          {/* Prompt history */}
-          <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ px: 1 }}>
-              Edit History ({notice.edit_history.length})
-            </Typography>
-            <List dense>
-              {notice.edit_history.slice().reverse().map((entry, i) => (
-                <ListItem
-                  key={i}
-                  sx={{
-                    px: 1, py: 0.5,
-                    cursor: entry.type === 'ai_prompt' ? 'pointer' : 'default',
-                    borderRadius: 1,
-                    '&:hover': entry.type === 'ai_prompt' ? { bgcolor: 'action.hover' } : {},
-                  }}
-                  onClick={() => {
-                    if (entry.type === 'ai_prompt' && entry.prompt) {
-                      setAiPrompt(entry.prompt);
-                    }
-                  }}
+            {isEditable && (
+              <Box sx={{ p: 2 }}>
+                <TextField
+                  fullWidth multiline rows={3} size="small"
+                  placeholder='e.g. "Make the tone stricter", "Add Section 138 reference", "Change deadline to 15 days"'
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  disabled={aiLoading}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiEdit(); } }}
+                />
+                <Button
+                  fullWidth variant="contained" size="small" sx={{ mt: 1 }}
+                  onClick={handleAiEdit}
+                  disabled={!aiPrompt.trim() || aiLoading}
+                  startIcon={aiLoading ? <CircularProgress size={16} /> : <SendIcon />}
                 >
-                  <ListItemText
-                    primary={entry.type === 'ai_prompt' ? entry.prompt : 'Manual edit'}
-                    secondary={new Date(entry.timestamp).toLocaleString('en-IN')}
-                    primaryTypographyProps={{
-                      variant: 'body2',
-                      sx: { fontStyle: entry.type === 'manual' ? 'italic' : 'normal' },
+                  {aiLoading ? 'Applying...' : 'Apply'}
+                </Button>
+              </Box>
+            )}
+
+            <Divider />
+
+            {/* Prompt history */}
+            <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ px: 1 }}>
+                Edit History ({notice.edit_history.length})
+              </Typography>
+              <List dense>
+                {notice.edit_history.slice().reverse().map((entry, i) => (
+                  <ListItem
+                    key={i}
+                    sx={{
+                      px: 1, py: 0.5,
+                      cursor: entry.type === 'ai_prompt' ? 'pointer' : 'default',
+                      borderRadius: 1,
+                      '&:hover': entry.type === 'ai_prompt' ? { bgcolor: 'action.hover' } : {},
                     }}
-                    secondaryTypographyProps={{ variant: 'caption' }}
-                  />
-                  <Chip label={entry.type === 'ai_prompt' ? 'AI' : 'Manual'} size="small"
-                    sx={{ ml: 1, fontSize: '0.65rem' }}
-                    color={entry.type === 'ai_prompt' ? 'primary' : 'default'}
-                  />
-                </ListItem>
-              ))}
-            </List>
+                    onClick={() => {
+                      if (entry.type === 'ai_prompt' && entry.prompt) {
+                        setAiPrompt(entry.prompt);
+                      }
+                    }}
+                  >
+                    <ListItemText
+                      primary={entry.type === 'ai_prompt' ? entry.prompt : 'Manual edit'}
+                      secondary={new Date(entry.timestamp).toLocaleString('en-IN')}
+                      primaryTypographyProps={{
+                        variant: 'body2',
+                        sx: { fontStyle: entry.type === 'manual' ? 'italic' : 'normal' },
+                      }}
+                      secondaryTypographyProps={{ variant: 'caption' }}
+                    />
+                    <Chip label={entry.type === 'ai_prompt' ? 'AI' : 'Manual'} size="small"
+                      sx={{ ml: 1, fontSize: '0.65rem' }}
+                      color={entry.type === 'ai_prompt' ? 'primary' : 'default'}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
           </Box>
-        </Box>}
+        )}
       </Box>
 
       {/* Bottom action bar */}

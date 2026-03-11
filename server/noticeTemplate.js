@@ -6,23 +6,18 @@ const fs = require('fs');
 
 function getNoticeHtml(notice) {
   let noticeContent = notice.notice_content || '';
-  // Embed lawyer signature image as base64 so PDF can render it (Puppeteer has no base URL)
-  if (noticeContent.includes('lawyer_signature.png')) {
-    const sigPath = path.resolve(__dirname, '..', '..', 'lawyer_signature.png');
-    try {
-      if (fs.existsSync(sigPath)) {
-        const sigBase64 = fs.readFileSync(sigPath).toString('base64');
-        const dataUrl = `data:image/png;base64,${sigBase64}`;
-        // Replace any img src pointing to lawyer_signature.png (relative or absolute URL)
-        noticeContent = noticeContent.replace(
-          /src="[^"]*lawyer_signature\.png[^"]*"/gi,
-          `src="${dataUrl}"`
-        );
-      }
-    } catch (e) {
-      // leave img as-is if file missing or read fails
-    }
-  }
+
+  // Transform signature block for PDF: Comic Sans bold name + digital code
+  const crypto = require('crypto');
+  const sigCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+  noticeContent = noticeContent.replace(
+    /<p><strong>Unnati Vashisth<\/strong><\/p>\s*<p>\(Advocate\)<\/p>/,
+    `<div style="margin: 8px 0;">
+      <p style="font-family: 'Comic Sans MS', 'Comic Sans', cursive; font-size: 22px; font-weight: bold; margin: 0; line-height: 1.3;">Unnati Vashisth</p>
+      <p style="font-size: 8px; color: #888; margin: 2px 0 0 0; font-family: monospace;">Digitally signed: ${sigCode}</p>
+      <p style="margin: 4px 0 0 0;">(Advocate)</p>
+    </div>`
+  );
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

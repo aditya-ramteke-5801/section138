@@ -92,7 +92,15 @@ export default function App() {
   };
 
   const handleAddMoreCases = () => {
-    resetChatState();
+    // Keep existing chat history, just reset phase so user can query again
+    setPhase('query');
+    setPendingQuestions([]);
+    setAnswers({});
+    addMessage({
+      role: 'assistant',
+      type: 'text',
+      content: 'Sure! Describe the additional cases you want to add to this campaign.',
+    });
     setView('picker');
   };
 
@@ -470,16 +478,12 @@ export default function App() {
             alt="DPDzero"
             style={{ height: 32, cursor: 'pointer' }}
             onClick={() => {
-              if (userRole === 'lawyer') {
-                setView('lawyer-notices');
-              } else {
-                setView('campaigns');
-              }
+              setUserRole('legal_ops');
+              setView('campaigns');
               setEditingNoticeId(null);
             }}
           />
           <Typography variant="body1" sx={{ opacity: 0.8 }}>
-            Legal Notice System
           </Typography>
 
           <Box sx={{ flex: 1 }} />
