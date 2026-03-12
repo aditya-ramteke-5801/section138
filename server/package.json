@@ -4,7 +4,7 @@
   "description": "Backend for Legal Case Picker",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node --max-old-space-size=450 index.js",
     "dev": "node --watch index.js"
   },
   "engines": {
