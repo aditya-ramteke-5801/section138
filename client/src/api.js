@@ -8,7 +8,7 @@ export function getSignatureImageUrl() {
   const origin = import.meta.env.VITE_API_URL && String(import.meta.env.VITE_API_URL).startsWith('http')
     ? new URL(import.meta.env.VITE_API_URL).origin
     : window.location.origin;
-  return `${origin}/api/lawyer_signature.png`;
+  return `${origin}/api/lawyer_signature.jpg`;
 }
 
 /** Fetch signature image, optionally resize for embedding, return as data URL. */

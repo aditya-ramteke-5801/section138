@@ -1,4 +1,7 @@
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+const dotenvPath = require('path');
+// Try loading .env from server dir first, then parent
+require('dotenv').config({ path: dotenvPath.join(__dirname, '.env') });
+require('dotenv').config({ path: dotenvPath.join(__dirname, '..', '.env') });
 
 const express = require('express');
 const cors = require('cors');
@@ -23,9 +26,9 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // Serve lawyer signature from hackathon root (for editor display)
-app.get('/api/lawyer_signature.png', (req, res) => {
-  const sigPath = path.resolve(__dirname, '..', '..', 'lawyer_signature.png');
-  res.setHeader('Content-Type', 'image/png');
+app.get('/api/lawyer_signature.jpg', (req, res) => {
+  const sigPath = process.env.SIGNATURE_PATH || path.resolve(__dirname, 'data', 'lawyer_signature.jpg');
+  res.setHeader('Content-Type', 'image/jpeg');
   res.sendFile(sigPath, (err) => {
     if (err) res.status(404).end();
   });

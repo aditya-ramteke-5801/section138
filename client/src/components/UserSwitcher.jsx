@@ -8,9 +8,9 @@ import CheckIcon from '@mui/icons-material/Check';
 const USERS = [
   {
     role: 'legal_ops',
-    name: 'Legal Operations',
-    subtitle: 'Create & manage campaigns',
-    initials: 'LO',
+    name: 'Khushi Vora',
+    subtitle: 'Legal Ops - Create & manage campaigns',
+    initials: 'KV',
     color: '#675AF9',
   },
   {

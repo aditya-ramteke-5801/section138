@@ -169,7 +169,7 @@ function QuestionBubble({ question, questionIndex, totalQuestions, onOptionSelec
 }
 
 const ResultsBubble = memo(function ResultsBubble({ message, onGenerateNotices, generatingNotices }) {
-  const { cases, explanation, filtersApplied, resultCount, totalCount } = message;
+  const { cases, explanation, resultCount, totalCount } = message;
   const rows = useMemo(() => (cases || []).map((c, i) => ({ id: i, ...c })), [cases]);
   const [selectedRows, setSelectedRows] = useState([]);
   const [officerDialogOpen, setOfficerDialogOpen] = useState(false);
@@ -210,19 +210,6 @@ const ResultsBubble = memo(function ResultsBubble({ message, onGenerateNotices, 
           </Typography>
         </Box>
 
-        {filtersApplied && filtersApplied.length > 0 && (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
-            {filtersApplied.map((f, i) => (
-              <Chip
-                key={i}
-                label={`${f.field} ${f.operator} ${typeof f.value === 'object' ? JSON.stringify(f.value) : f.value}`}
-                size="small"
-                variant="outlined"
-                sx={{ borderColor: '#675AF9', color: 'primary.dark', fontSize: '0.7rem' }}
-              />
-            ))}
-          </Box>
-        )}
 
         <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
           {explanation}

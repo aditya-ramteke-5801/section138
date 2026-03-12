@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   AppBar, Toolbar, Typography, Box, TextField, IconButton,
   CircularProgress, Button, LinearProgress,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import ChatMessage from './components/ChatMessage';
@@ -43,6 +44,9 @@ export default function App() {
   const [activeCampaignId, setActiveCampaignId] = useState(null);
   const [activeCampaignName, setActiveCampaignName] = useState('');
   const [generatingNotices, setGeneratingNotices] = useState(false);
+  const [campaignNameDialog, setCampaignNameDialog] = useState(false);
+  const [campaignNameInput, setCampaignNameInput] = useState('');
+  const pendingGenerateRef = useRef(null);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -289,17 +293,18 @@ export default function App() {
   const handleGenerateNotices = useCallback(async (selectedRows, officerDetails) => {
     if (!selectedRows || selectedRows.length === 0) return;
 
+    // If no campaign yet, prompt for a name first
+    if (!activeCampaignId) {
+      pendingGenerateRef.current = { selectedRows, officerDetails };
+      setCampaignNameInput('');
+      setCampaignNameDialog(true);
+      return;
+    }
+
     setGeneratingNotices(true);
 
     try {
-      // Create campaign if needed
       let campaignId = activeCampaignId;
-      if (!campaignId) {
-        const campaign = await createCampaign(null, filters);
-        campaignId = campaign.id;
-        setActiveCampaignId(campaign.id);
-        setActiveCampaignName(campaign.name);
-      }
 
       const result = await generateNotices(selectedRows, officerDetails, campaignId);
       setGeneratingNotices(false);
@@ -323,6 +328,43 @@ export default function App() {
       });
     }
   }, [activeCampaignId, filters]);
+
+  const handleCampaignNameConfirm = useCallback(async () => {
+    const name = campaignNameInput.trim();
+    if (!name) return;
+    setCampaignNameDialog(false);
+
+    const pending = pendingGenerateRef.current;
+    if (!pending) return;
+    pendingGenerateRef.current = null;
+
+    setGeneratingNotices(true);
+    try {
+      const campaign = await createCampaign(name, filters);
+      setActiveCampaignId(campaign.id);
+      setActiveCampaignName(campaign.name);
+
+      const result = await generateNotices(pending.selectedRows, pending.officerDetails, campaign.id);
+      setGeneratingNotices(false);
+
+      addMessage({
+        role: 'assistant',
+        type: 'text',
+        content: `Generated ${result.generated} notice${result.generated !== 1 ? 's' : ''} successfully${result.failed > 0 ? ` (${result.failed} failed)` : ''}. You can now view them in the campaign.`,
+      });
+
+      setTimeout(() => {
+        setView('campaign-notices');
+      }, 1500);
+    } catch (err) {
+      setGeneratingNotices(false);
+      addMessage({
+        role: 'assistant',
+        type: 'text',
+        content: `Failed to generate notices: ${err.response?.data?.error || err.message}`,
+      });
+    }
+  }, [campaignNameInput, filters]);
 
   // === Render ===
 
@@ -373,31 +415,41 @@ export default function App() {
       <>
         {/* Chat messages area */}
         <Box sx={{
-          flex: 1, overflowY: 'auto', px: 2, py: 2,
-          display: 'flex', flexDirection: 'column', gap: 1.5,
+          flex: 1, overflowY: 'auto', py: 2,
+          display: 'flex', flexDirection: 'column',
         }}>
-          {messages.map(msg => (
-            <ChatMessage
-              key={msg.id}
-              message={msg}
-              onOptionSelect={handleOptionSelect}
-              onGenerateNotices={handleGenerateNotices}
-              loading={loading}
-              generatingNotices={generatingNotices}
-            />
-          ))}
-          {loading && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
-              <CircularProgress size={18} sx={{ color: 'primary.main' }} />
-              <Typography variant="body2" color="text.secondary">Thinking...</Typography>
-            </Box>
-          )}
-          <div ref={messagesEndRef} />
+          <Box sx={{
+            maxWidth: 768, width: '100%', mx: 'auto', px: 3,
+            display: 'flex', flexDirection: 'column', gap: 1.5,
+            flex: 1,
+            justifyContent: messages.length === 0 ? 'center' : 'flex-start',
+          }}>
+            {messages.map(msg => (
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                onOptionSelect={handleOptionSelect}
+                onGenerateNotices={handleGenerateNotices}
+                loading={loading}
+                generatingNotices={generatingNotices}
+              />
+            ))}
+            {loading && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
+                <CircularProgress size={18} sx={{ color: 'primary.main' }} />
+                <Typography variant="body2" color="text.secondary">Thinking...</Typography>
+              </Box>
+            )}
+            <div ref={messagesEndRef} />
+          </Box>
         </Box>
 
         {/* Input area */}
         <Box sx={{
-          p: 2, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper',
+          borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', py: 2,
+        }}>
+        <Box sx={{
+          maxWidth: 768, width: '100%', mx: 'auto', px: 3,
           display: 'flex', gap: 1, alignItems: 'flex-end',
         }}>
           <TextField
@@ -465,6 +517,7 @@ export default function App() {
             <SendIcon fontSize="small" />
           </IconButton>
         </Box>
+        </Box>
       </>
     );
   };
@@ -504,6 +557,28 @@ export default function App() {
 
       {/* Main content */}
       {renderContent()}
+
+      {/* Campaign name dialog */}
+      <Dialog open={campaignNameDialog} onClose={() => setCampaignNameDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Name this campaign</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Campaign name"
+            value={campaignNameInput}
+            onChange={(e) => setCampaignNameInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCampaignNameConfirm()}
+            sx={{ mt: 1 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCampaignNameDialog(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleCampaignNameConfirm} disabled={!campaignNameInput.trim()}>
+            Create & Generate
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

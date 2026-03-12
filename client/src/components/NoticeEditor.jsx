@@ -16,6 +16,7 @@ import 'react-quill/dist/quill.snow.css';
 import {
   getNotice, updateNoticeContent, aiEditNotice, sendToLawyer,
   signNotice, rejectNotice, previewPdf, downloadPdf, sendEmail,
+  fetchSignatureDataUrl,
 } from '../api';
 
 const QUILL_MODULES_EDITABLE = {
@@ -171,6 +172,20 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
         URL.revokeObjectURL(pdfUrl);
         setPdfUrl(null);
       }
+      // Embed signature image into notice content before signing
+      let content = notice.notice_content || '';
+      try {
+        const sigDataUrl = await fetchSignatureDataUrl(200);
+        const sigImgHtml = `<p><img src="${sigDataUrl}" alt="Signature" style="max-width:200px;" /></p>`;
+        // Insert signature image before the lawyer name block
+        content = content.replace(
+          /<p><strong>Unnati Vashisth<\/strong><\/p>/,
+          `${sigImgHtml}<p><strong>Unnati Vashisth</strong></p>`
+        );
+        await updateNoticeContent(noticeId, content);
+      } catch (sigErr) {
+        console.warn('Could not embed signature image:', sigErr);
+      }
       const updated = await signNotice(noticeId, 'Unnati Vashisth (Advocate)');
       setNotice(updated);
       await loadNotice();
@@ -268,34 +283,17 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
                 </Box>
               )}
 
-              {/* Editable: use Quill. Read-only: render plain HTML to avoid Quill mutations */}
-              {isEditable ? (
-                <Box sx={{ flex: 1, overflow: 'auto' }}>
-                  <ReactQuill
-                    value={notice.notice_content}
-                    onChange={handleContentChange}
-                    theme="snow"
-                    style={{ height: 'calc(100% - 42px)' }}
-                    modules={QUILL_MODULES_EDITABLE}
-                  />
-                </Box>
-              ) : (
-                <Box
-                  sx={{
-                    flex: 1, overflow: 'auto', px: 4, py: 3,
-                    fontFamily: "'Times New Roman', Times, serif",
-                    fontSize: '13px',
-                    lineHeight: 1.8,
-                    '& p': { margin: '4px 0' },
-                    '& ol': { margin: '10px 0 10px 20px' },
-                    '& ol li': { marginBottom: '8px' },
-                    '& .ql-align-center': { textAlign: 'center' },
-                    '& .ql-align-right': { textAlign: 'right' },
-                    '& .ql-align-justify': { textAlign: 'justify' },
-                  }}
-                  dangerouslySetInnerHTML={{ __html: notice.notice_content }}
+              {/* Both editable and read-only use Quill to preserve consistent formatting */}
+              <Box sx={{ flex: 1, overflow: 'auto' }}>
+                <ReactQuill
+                  value={notice.notice_content}
+                  onChange={isEditable ? handleContentChange : undefined}
+                  readOnly={!isEditable}
+                  theme="snow"
+                  style={{ height: 'calc(100% - 42px)' }}
+                  modules={isEditable ? QUILL_MODULES_EDITABLE : QUILL_MODULES_READONLY}
                 />
-              )}
+              </Box>
             </Box>
           )}
         </Box>

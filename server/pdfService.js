@@ -5,10 +5,24 @@ let browser = null;
 
 async function getBrowser() {
   if (!browser) {
-    browser = await puppeteer.launch({
+    const launchOptions = {
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--single-process',
+      ],
+    };
+
+    // On Render (Linux), use the installed Chromium via puppeteer
+    // puppeteer automatically downloads Chromium during npm install
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+
+    browser = await puppeteer.launch(launchOptions);
   }
   return browser;
 }

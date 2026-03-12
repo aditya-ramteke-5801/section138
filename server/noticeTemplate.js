@@ -7,17 +7,6 @@ const fs = require('fs');
 function getNoticeHtml(notice) {
   let noticeContent = notice.notice_content || '';
 
-  // Transform signature block for PDF: Comic Sans bold name + digital code
-  const crypto = require('crypto');
-  const sigCode = crypto.randomBytes(6).toString('hex').toUpperCase();
-  noticeContent = noticeContent.replace(
-    /<p><strong>Unnati Vashisth<\/strong><\/p>\s*<p>\(Advocate\)<\/p>/,
-    `<div style="margin: 8px 0;">
-      <p style="font-family: 'Comic Sans MS', 'Comic Sans', cursive; font-size: 22px; font-weight: bold; margin: 0; line-height: 1.3;">Unnati Vashisth</p>
-      <p style="font-size: 8px; color: #888; margin: 2px 0 0 0; font-family: monospace;">Digitally signed: ${sigCode}</p>
-      <p style="margin: 4px 0 0 0;">(Advocate)</p>
-    </div>`
-  );
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
