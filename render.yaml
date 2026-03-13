@@ -3,10 +3,12 @@ services:
     name: legal-case-picker-api
     runtime: node
     rootDir: server
-    buildCommand: npm install
-    startCommand: node --max-old-space-size=450 index.js
+    buildCommand: PUPPETEER_CACHE_DIR=/opt/render/project/src/server/.cache/puppeteer npm install
+    startCommand: PUPPETEER_CACHE_DIR=/opt/render/project/src/server/.cache/puppeteer node --max-old-space-size=450 index.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: OPENAI_API_KEY
         sync: false  # Set manually in Render dashboard
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/project/src/server/.cache/puppeteer

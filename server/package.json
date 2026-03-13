@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node --max-old-space-size=450 index.js",
     "dev": "node --watch index.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "postinstall": "PUPPETEER_CACHE_DIR=$(pwd)/.cache/puppeteer npx puppeteer browsers install chrome"
   },
   "engines": {
     "node": ">=18.0.0"
