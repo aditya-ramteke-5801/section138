@@ -394,10 +394,15 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
                 Send to Lawyer
               </Button>
             )}
-            {(notice.status === 'signed' || notice.status === 'dispatched') && (
+            {notice.status === 'signed' && (
               <Button size="small" variant="contained" color="success" startIcon={emailSending ? <CircularProgress size={16} /> : <EmailIcon />}
                 onClick={handleSendEmail} disabled={emailSending}>
                 {emailSending ? 'Sending...' : 'Send Email'}
+              </Button>
+            )}
+            {notice.status === 'dispatched' && (
+              <Button size="small" variant="outlined" color="success" startIcon={<CheckCircleIcon />} disabled>
+                Sent
               </Button>
             )}
           </>
