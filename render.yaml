@@ -3,12 +3,10 @@ services:
     name: legal-case-picker-api
     runtime: node
     rootDir: server
-    buildCommand: npm install
-    startCommand: node index.js
+    buildCommand: npm install && npx puppeteer browsers install chrome
+    startCommand: node --max-old-space-size=450 index.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: OPENAI_API_KEY
         sync: false  # Set manually in Render dashboard
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/google-chrome-stable
