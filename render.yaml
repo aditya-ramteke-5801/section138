@@ -3,7 +3,7 @@ services:
     name: legal-case-picker-api
     runtime: node
     rootDir: server
-    buildCommand: npm install && npx puppeteer browsers install chrome
+    buildCommand: npm install
     startCommand: node --max-old-space-size=450 index.js
     envVars:
       - key: NODE_ENV
