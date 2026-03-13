@@ -55,7 +55,6 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectComment, setRejectComment] = useState('');
-  const [emailOpen, setEmailOpen] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
   const [emailSending, setEmailSending] = useState(false);
   const [pdfError, setPdfError] = useState(null);
@@ -206,11 +205,9 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
   };
 
   const handleSendEmail = async () => {
-    if (!emailAddress.trim()) return;
     setEmailSending(true);
     try {
-      await sendEmail(noticeId, emailAddress.trim());
-      setEmailOpen(false);
+      await sendEmail(noticeId, notice.borrower_email || emailAddress.trim());
       loadNotice();
     } catch (err) {
       console.error('Email send failed:', err);
@@ -398,9 +395,9 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
               </Button>
             )}
             {(notice.status === 'signed' || notice.status === 'dispatched') && (
-              <Button size="small" variant="contained" color="success" startIcon={<EmailIcon />}
-                onClick={() => setEmailOpen(true)}>
-                Send Email
+              <Button size="small" variant="contained" color="success" startIcon={emailSending ? <CircularProgress size={16} /> : <EmailIcon />}
+                onClick={handleSendEmail} disabled={emailSending}>
+                {emailSending ? 'Sending...' : 'Send Email'}
               </Button>
             )}
           </>
@@ -437,30 +434,6 @@ export default function NoticeEditor({ noticeId, onBack, userRole }) {
         </DialogActions>
       </Dialog>
 
-      {/* Email dialog */}
-      <Dialog open={emailOpen} onClose={() => setEmailOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Send Notice via Email</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Send the signed notice PDF to the borrower via email.
-          </Typography>
-          <TextField
-            fullWidth label="Borrower Email" value={emailAddress}
-            onChange={(e) => setEmailAddress(e.target.value)}
-            sx={{ mt: 1 }}
-          />
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            The email will include an AI-generated summary and the signed PDF as attachment.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEmailOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSendEmail} disabled={!emailAddress.trim() || emailSending}
-            startIcon={emailSending ? <CircularProgress size={16} /> : <EmailIcon />}>
-            {emailSending ? 'Sending...' : 'Send'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

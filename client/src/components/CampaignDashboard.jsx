@@ -48,14 +48,6 @@ export default function CampaignDashboard({ onNewCampaign, onOpenCampaign }) {
             Each campaign is a batch of legal notices from a case selection
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={onNewCampaign}
-          sx={{ borderRadius: 2 }}
-        >
-          New Campaign
-        </Button>
       </Box>
 
       {loading ? (
