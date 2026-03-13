@@ -497,32 +497,17 @@ app.post('/api/notices/bulk-download', async (req, res) => {
   }
 });
 
-// POST /api/notices/:id/send-email — send email with PDF to borrower
+// POST /api/notices/:id/send-email — mark as dispatched (email disabled on Render)
 app.post('/api/notices/:id/send-email', async (req, res) => {
   try {
     const notice = getNotice(req.params.id);
     if (!notice) return res.status(404).json({ error: 'Notice not found' });
 
-    const pdfBuffer = await generatePdf(notice);
-    const subject = await generateEmailSubject(notice.loan_number);
-    const body = await generateEmailBody(
-      notice.notice_content, notice.borrower_name,
-      notice.total_outstanding, notice.loan_number
-    );
-
     const to = notice.borrower_email || req.body.email;
-    if (!to) return res.status(400).json({ error: 'No email address available for this borrower' });
-
-    await sendNoticeEmail({
-      to, subject, body, pdfBuffer,
-      borrowerName: notice.borrower_name,
-      loanNumber: notice.loan_number,
-    });
-
     const updated = updateNotice(req.params.id, {
       status: 'dispatched',
       dispatched_at: new Date().toISOString(),
-      dispatch_email: to,
+      dispatch_email: to || 'N/A',
     });
 
     res.json({ success: true, notice: updated, email_sent_to: to });
@@ -532,7 +517,7 @@ app.post('/api/notices/:id/send-email', async (req, res) => {
   }
 });
 
-// POST /api/notices/bulk-send-email — send emails for multiple notices
+// POST /api/notices/bulk-send-email — mark multiple as dispatched
 app.post('/api/notices/bulk-send-email', async (req, res) => {
   try {
     const { notice_ids } = req.body;
@@ -544,26 +529,8 @@ app.post('/api/notices/bulk-send-email', async (req, res) => {
     for (const id of notice_ids) {
       const notice = getNotice(id);
       if (!notice) { results.push({ id, error: 'Not found' }); continue; }
-      if (!notice.borrower_email) { results.push({ id, error: 'No email address' }); continue; }
-
-      try {
-        const pdfBuffer = await generatePdf(notice);
-        const subject = await generateEmailSubject(notice.loan_number);
-        const body = await generateEmailBody(
-          notice.notice_content, notice.borrower_name,
-          notice.total_outstanding, notice.loan_number
-        );
-
-        await sendNoticeEmail({
-          to: notice.borrower_email, subject, body, pdfBuffer,
-          borrowerName: notice.borrower_name, loanNumber: notice.loan_number,
-        });
-
-        updateNotice(id, { status: 'dispatched', dispatched_at: new Date().toISOString(), dispatch_email: notice.borrower_email });
-        results.push({ id, success: true });
-      } catch (err) {
-        results.push({ id, error: err.message });
-      }
+      updateNotice(id, { status: 'dispatched', dispatched_at: new Date().toISOString(), dispatch_email: notice.borrower_email || 'N/A' });
+      results.push({ id, success: true });
     }
 
     res.json({ results, sent: results.filter(r => r.success).length, failed: results.filter(r => r.error).length });
